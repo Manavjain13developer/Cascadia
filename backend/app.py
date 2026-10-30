@@ -5,6 +5,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 
 if __package__:
     from backend.core.router import (
+        OllamaIncompleteResponse,
         OllamaInvalidResponse,
         OllamaModelNotFound,
         OllamaTimeout,
@@ -14,6 +15,7 @@ if __package__:
     )
 else:
     from core.router import (
+        OllamaIncompleteResponse,
         OllamaInvalidResponse,
         OllamaModelNotFound,
         OllamaTimeout,
@@ -37,6 +39,8 @@ def query_model():
 
     try:
         result = route_query(query.strip())
+    except OllamaIncompleteResponse:
+        return jsonify({"error": _stream_error_message(OllamaIncompleteResponse())}), 502
     except OllamaModelNotFound:
         return jsonify({"error": _stream_error_message(OllamaModelNotFound())}), 404
     except OllamaTimeout:
@@ -54,6 +58,8 @@ def _sse_event(name: str, payload: dict[str, object]) -> str:
 
 
 def _stream_error_message(error: Exception) -> str:
+    if isinstance(error, OllamaIncompleteResponse):
+        return "Ollama reached its output-token limit before completing the response. Try a shorter prompt."
     if isinstance(error, OllamaModelNotFound):
         return "The selected Ollama model is not installed. Install qwen2.5:3b and qwen2.5:7b locally."
     if isinstance(error, OllamaTimeout):
@@ -93,6 +99,7 @@ def stream_query_model():
                 elif "complete" in part:
                     yield _sse_event("complete", part["complete"])
         except (
+            OllamaIncompleteResponse,
             OllamaModelNotFound,
             OllamaTimeout,
             OllamaUnavailable,

@@ -10,6 +10,7 @@ from backend.core.router import (
     OLLAMA_URL,
     RESPONSE_SYSTEM_PROMPT,
     SMALL_MODEL,
+    OllamaIncompleteResponse,
     OllamaInvalidResponse,
     OllamaModelNotFound,
     OllamaTimeout,
@@ -111,7 +112,7 @@ class RoutingApiTests(unittest.TestCase):
                         "stream": False,
                         "keep_alive": "10m",
                         "options": {
-                            "num_predict": 256,
+                            "num_predict": 1024,
                             "num_ctx": 4096,
                         },
                     },
@@ -169,6 +170,9 @@ class RoutingApiTests(unittest.TestCase):
         self.assertEqual(events[0], {"token": "A concise answer."})
         self.assertEqual(events[1]["metrics"]["generated_tokens"], 21)
         self.assertEqual(events[1]["metrics"]["token_generation_ms"], 700.0)
+        response.iter_lines.assert_called_once_with(
+            chunk_size=1, decode_unicode=True
+        )
 
     @patch("backend.core.router.requests.post")
     def test_complex_prompt_gets_a_larger_generation_budget(self, post):
@@ -183,8 +187,37 @@ class RoutingApiTests(unittest.TestCase):
 
         self.assertEqual(
             post.call_args.kwargs["json"]["options"],
-            {"num_predict": 1536, "num_ctx": 4096},
+            {"num_predict": 4096, "num_ctx": 8192},
         )
+
+    @patch("backend.core.router.requests.post")
+    def test_non_streaming_output_limit_is_not_reported_as_complete(self, post):
+        response = Mock()
+        response.json.return_value = {
+            "response": "A truncated answer",
+            "done": True,
+            "done_reason": "length",
+        }
+        post.return_value = response
+
+        with self.assertRaises(OllamaIncompleteResponse):
+            generate_response_with_metrics(SMALL_MODEL, "Explain this topic")
+
+    @patch("backend.core.router.requests.post")
+    def test_streaming_output_limit_is_not_reported_as_complete(self, post):
+        response = Mock()
+        response.iter_lines.return_value = iter([
+            '{"response":"A truncated answer"}',
+            '{"done":true,"done_reason":"length"}',
+        ])
+        post.return_value = response
+
+        stream = stream_response(SMALL_MODEL, "Explain this topic")
+        self.assertEqual(next(stream), {"token": "A truncated answer"})
+        with self.assertRaises(OllamaIncompleteResponse):
+            next(stream)
+
+        response.close.assert_called_once()
 
     @patch(
         "backend.core.router.generate_response_with_metrics",
@@ -339,6 +372,22 @@ class RoutingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("event: error", body)
         self.assertIn("timed out", body)
+        cascade.assert_called_once()
+
+    @patch(
+        "backend.app.stream_cascaded_response",
+        side_effect=OllamaIncompleteResponse,
+    )
+    def test_stream_endpoint_reports_output_limit_without_completion(self, cascade):
+        response = self.client.post(
+            "/api/query/stream",
+            json={"query": "Explain this topic"},
+        )
+        body = response.get_data(as_text=True)
+
+        self.assertIn("event: error", body)
+        self.assertIn("output-token limit", body)
+        self.assertNotIn("event: complete", body)
         cascade.assert_called_once()
 
     @patch("backend.app.stream_cascaded_response")
@@ -555,6 +604,20 @@ class RoutingApiTests(unittest.TestCase):
             {"error": "Ollama is unavailable. Check that it is running locally."},
         )
         generate_response.assert_called_once_with("qwen2.5:3b", "hello")
+
+    @patch(
+        "backend.core.router.generate_response_with_metrics",
+        side_effect=OllamaIncompleteResponse,
+    )
+    def test_query_endpoint_reports_output_limit_as_incomplete(self, generate_response):
+        response = self.client.post(
+            "/api/query",
+            json={"query": "Explain this topic"},
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("output-token limit", response.get_json()["error"])
+        generate_response.assert_called_once_with(SMALL_MODEL, "Explain this topic")
 
 
 if __name__ == "__main__":

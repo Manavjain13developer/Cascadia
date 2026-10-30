@@ -54,6 +54,10 @@ class OllamaInvalidResponse(Exception):
     """Ollama returned a body without a valid response string."""
 
 
+class OllamaIncompleteResponse(OllamaInvalidResponse):
+    """Ollama stopped at its output limit before completing a response."""
+
+
 class OllamaModelNotFound(Exception):
     """Ollama does not have the requested model installed."""
 
@@ -66,14 +70,18 @@ def _generation_options(prompt: str) -> dict[str, int]:
     word_count = len(prompt.split())
     is_complex = word_count > 35 or bool(COMPLEX_QUERY_PATTERN.search(prompt))
     if is_complex:
-        num_predict = 1536
+        num_predict = 4096
     elif word_count <= 12:
-        num_predict = 256
+        num_predict = 1024
     else:
-        num_predict = 768
+        num_predict = 2048
 
     estimated_prompt_tokens = math.ceil(
         (len(RESPONSE_SYSTEM_PROMPT) + len(prompt)) / 3
+    )
+    num_predict = min(
+        num_predict,
+        max(1, MAX_CONTEXT_SIZE - estimated_prompt_tokens - 256),
     )
     required_context = estimated_prompt_tokens + num_predict + 256
     num_ctx = min(
@@ -136,6 +144,8 @@ def generate_response_with_metrics(
 
     try:
         payload = response.json()
+        if payload.get("done_reason") == "length":
+            raise OllamaIncompleteResponse
         response_text = payload.get("response")
     except (AttributeError, ValueError) as error:
         raise OllamaInvalidResponse from error
@@ -191,7 +201,7 @@ def stream_response(model: str, prompt: str) -> Iterator[dict[str, object]]:
     text_received = False
     completed = False
     try:
-        for line in response.iter_lines(decode_unicode=True):
+        for line in response.iter_lines(chunk_size=1, decode_unicode=True):
             if not line:
                 continue
             if isinstance(line, bytes):
@@ -218,6 +228,8 @@ def stream_response(model: str, prompt: str) -> Iterator[dict[str, object]]:
 
             if payload.get("done") is True:
                 completed = True
+                if payload.get("done_reason") == "length":
+                    raise OllamaIncompleteResponse
                 if not text_received:
                     raise OllamaInvalidResponse
                 yield {"metrics": _response_metrics(payload)}

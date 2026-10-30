@@ -10,9 +10,10 @@ generation timings, generated output tokens, and tokens per second. Streamed
 requests also report time to first displayed token; this includes the 3B
 confidence preflight. Token count and generation speed come from Ollama's
 `eval_count` and `eval_duration`, not an estimate from response text.
-Generation limits scale with query complexity (256, 768, or 1,536 tokens),
-context grows only when needed, and Ollama's model-default temperature is
-retained.
+Generation limits scale with query complexity (1,024, 2,048, or 4,096 tokens),
+are bounded by available context, and Ollama's model-default temperature is
+retained. A response stopped by Ollama's output-token limit is reported as
+incomplete rather than marked complete.
 
 Backend:
 
@@ -34,8 +35,10 @@ Server-Sent Events. Confidence routing still needs the complete 3B candidate
 before selecting the final model. If 3B is selected, Cascadia progressively
 replays that buffered candidate instead of generating it again; if confidence
 is below the threshold, the selected 7B answer is streamed live. Time to first
-displayed text includes the complete 3B preflight. Stopping a request closes the
-active Ollama stream.
+token is measured in the browser from request start until the first response
+text arrives, including the complete 3B preflight and transport time. Total
+response time is measured through receipt of the completion event. Stopping a
+request closes the active Ollama stream.
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 

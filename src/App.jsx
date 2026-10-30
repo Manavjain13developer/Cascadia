@@ -9,19 +9,17 @@ import {
   Activity,
   ArrowUpRight,
   BarChart3,
-  Check,
   CircleUserRound,
   Clock3,
   Cpu,
-  Gauge,
   Home as HomeIcon,
   Layers3,
   LoaderCircle,
   Menu,
   Network,
+  Paperclip,
   PanelLeftClose,
   Search,
-  SlidersHorizontal,
   Send,
   Settings as SettingsIcon,
   Sparkles,
@@ -30,7 +28,40 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useRef, useState } from "react";
+import benchmarkRun from "../backend/benchmarks/results.json";
 import "./App.css";
+
+const SMALL_MODEL = "qwen2.5:3b";
+const LARGE_MODEL = "qwen2.5:7b";
+
+const configuredModels = [
+  {
+    name: SMALL_MODEL,
+    size: "3B parameters",
+    role: "Confidence preflight and direct responses",
+  },
+  {
+    name: LARGE_MODEL,
+    size: "7B parameters",
+    role: "Escalation when confidence is below threshold",
+  },
+];
+
+function formatDuration(milliseconds) {
+  if (typeof milliseconds !== "number" || !Number.isFinite(milliseconds)) {
+    return "—";
+  }
+  return milliseconds >= 1000
+    ? `${(milliseconds / 1000).toFixed(2)} s`
+    : `${milliseconds.toFixed(0)} ms`;
+}
+
+function formatBenchmarkDate(timestamp) {
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime())
+    ? "Date unavailable"
+    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
+}
 
 async function* readServerSentEvents(stream) {
   const reader = stream.getReader();
@@ -75,6 +106,7 @@ async function* readServerSentEvents(stream) {
 }
 
 const navigation = [
+  { label: "Overview", path: "/", icon: HomeIcon },
   { label: "Playground", path: "/playground", icon: Sparkles },
   { label: "Models", path: "/models", icon: Layers3 },
   { label: "Routing", path: "/routing", icon: Network },
@@ -82,16 +114,15 @@ const navigation = [
   { label: "Analytics", path: "/analytics", icon: BarChart3 },
   { label: "Settings", path: "/settings", icon: SettingsIcon },
   { label: "About", path: "/about", icon: CircleUserRound },
-  { label: "Home", path: "/", icon: HomeIcon },
 ];
 
 function Logo() {
   return (
     <div className="flex items-center gap-3">
-      <div className="relative h-7 w-7">
-        <span className="absolute left-0 top-3 h-3 w-3 rotate-45 border-l border-t border-sky-300" />
-        <span className="absolute left-2 top-1 h-5 w-3 rotate-45 border-l border-t border-blue-400" />
-        <span className="absolute left-4 top-3 h-3 w-3 rotate-45 border-l border-t border-violet-300" />
+      <div className="brand-mark" aria-hidden="true">
+        <span />
+        <span />
+        <span />
       </div>
       <span className="font-display text-sm font-medium tracking-[.18em] text-slate-100">
         CASCADIA
@@ -103,7 +134,7 @@ function Logo() {
 function Sidebar({ open, onClose }) {
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-white/[.08] bg-[#06101c]/95 px-5 py-6 backdrop-blur-xl transition-transform duration-300 md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}
+      className={`app-sidebar fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-white/[.08] px-5 py-6 backdrop-blur-xl transition-transform duration-300 md:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}
     >
       <div className="mb-14 flex items-center justify-between px-2">
         <Logo />
@@ -141,13 +172,13 @@ function Sidebar({ open, onClose }) {
       </nav>
       <div className="mt-auto rounded-xl border border-white/[.08] bg-white/[.025] p-4">
         <div className="mb-3 flex items-center gap-2 text-[11px] text-slate-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]" />
-          Local runtime
+          <span className="status-beacon" />
+          Local inference
         </div>
         <p className="font-mono text-[9px] leading-relaxed text-slate-600">
-          Models stay close.
+          Ollama runs locally.
           <br />
-          Requests stay yours.
+          Requests stay private.
         </p>
       </div>
     </aside>
@@ -156,7 +187,7 @@ function Sidebar({ open, onClose }) {
 
 function Header({ onMenu }) {
   return (
-    <header className="flex h-20 items-center justify-between border-b border-white/[.07] px-5 md:hidden">
+    <header className="app-mobile-header flex h-20 items-center justify-between border-b border-white/[.07] px-5 md:hidden">
       <button
         className="text-slate-300"
         onClick={onMenu}
@@ -165,138 +196,216 @@ function Header({ onMenu }) {
         <Menu size={20} />
       </button>
       <Logo />
-      <div className="h-7 w-7 rounded-full border border-white/10 bg-white/[.04]" />
+      <span className="mobile-runtime" aria-label="Local runtime">
+        <span className="status-beacon" />
+      </span>
     </header>
   );
 }
 
-function Feature({ icon: Icon, title, children, accent }) {
-  return (
-    <div className="animate-rise border-t border-white/[.12] pt-5">
-      <div
-        className={`mb-4 flex h-9 w-9 items-center justify-center rounded-full border ${accent}`}
-      >
-        <Icon size={16} strokeWidth={1.5} />
-      </div>
-      <h3 className="font-display text-sm font-medium text-slate-100">
-        {title}
-      </h3>
-      <p className="mt-2 max-w-[13rem] text-xs leading-relaxed text-slate-500">
-        {children}
-      </p>
-    </div>
-  );
-}
-
-function Home() {
+function Home({ activity }) {
   const navigate = useNavigate();
+  const successfulQueries = activity.length;
+  const escalatedQueries = activity.filter((item) => item.escalated).length;
+  const averageResponseTime = successfulQueries
+    ? activity.reduce((total, item) => total + item.timing.total_ms, 0) /
+      successfulQueries
+    : null;
+  const benchmarkSummary = benchmarkRun.summary;
+  const benchmarkSamples = benchmarkRun.results.slice(-4).reverse();
+
   return (
-    <main className="relative overflow-hidden px-5 pb-16 pt-10 sm:px-10 md:px-14 md:pt-16">
-      <div className="hero-grid pointer-events-none absolute inset-0 h-[38rem] opacity-70" />
-      <div className="orb pointer-events-none" />
-      <div className="relative mx-auto max-w-6xl">
-        <div className="mb-20 max-w-3xl animate-rise sm:mb-28">
-          <div className="mb-8 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[.28em] text-sky-300/70">
-            <span className="h-px w-8 bg-sky-400/50" />
-            Confidence-aware inference
-          </div>
-          <h1 className="max-w-3xl font-display text-[clamp(3.5rem,9vw,7.9rem)] font-medium leading-[.87] tracking-[-.06em] text-slate-50">
-            INTELLIGENCE.
-            <br />
-            <span className="bg-gradient-to-r from-slate-100 via-blue-300 to-violet-400 bg-clip-text text-transparent">
-              ROUTED SMARTER.
-            </span>
-          </h1>
-          <p className="mt-8 max-w-md text-sm leading-7 text-slate-400 sm:text-base">
-            Confidence-aware model cascading for faster, cost-efficient AI
-            agents.
+    <main className="page-wrap">
+      <div className="page-content max-w-6xl">
+        <PageHeader eyebrow="LOCAL INFERENCE / OVERVIEW" title="Workspace">
+          <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">
+            A live view of this session, your configured model cascade, and the
+            latest recorded benchmark.
           </p>
-          <button
-            onClick={() => navigate("/playground")}
-            className="group mt-9 inline-flex items-center gap-3 rounded-full border border-sky-300/40 bg-sky-300/[.08] px-5 py-3 text-xs font-medium text-sky-100 transition hover:border-sky-200/70 hover:bg-sky-300/[.15]"
-          >
-            Try Cascadia{" "}
-            <ArrowUpRight
-              size={15}
-              className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
-            />
-          </button>
-        </div>
-        <div className="grid gap-9 border-b border-white/[.08] pb-16 sm:grid-cols-3 sm:gap-5">
-          <Feature
-            icon={Gauge}
-            title="Confidence-aware"
-            accent="border-sky-300/30 text-sky-300"
-          >
-            Routes queries based on model confidence.
-          </Feature>
-          <Feature
-            icon={Activity}
-            title="Cost-efficient"
-            accent="border-violet-300/30 text-violet-300"
-          >
-            Uses lightweight models whenever possible.
-          </Feature>
-          <Feature
-            icon={Cpu}
-            title="Local-first"
-            accent="border-cyan-300/30 text-cyan-300"
-          >
-            Designed around local AI inference.
-          </Feature>
-        </div>
-        <section className="mt-16 max-w-4xl animate-rise delay-2">
-          <div className="mb-9 flex items-end justify-between">
-            <div>
-              <p className="font-mono text-[9px] uppercase tracking-[.25em] text-slate-600">
-                The cascade
-              </p>
-              <h2 className="mt-3 font-display text-2xl text-slate-100 sm:text-3xl">
-                HOW CASCADIA THINKS
-              </h2>
-            </div>
-            <span className="hidden font-mono text-[9px] uppercase tracking-widest text-slate-600 sm:block">
-              01 / 04
+        </PageHeader>
+
+        <section className="dashboard-status glass mb-5 flex flex-wrap items-center justify-between gap-5 rounded-2xl p-5 sm:p-6">
+          <div className="flex items-start gap-4">
+            <span className="dashboard-status-icon">
+              <Activity size={18} />
             </span>
+            <div>
+              <p className="eyebrow-label">System status</p>
+              <h2 className="mt-2 font-display text-lg text-slate-100">
+                {successfulQueries ? "Local inference responding" : "Awaiting a live request"}
+              </h2>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {successfulQueries
+                  ? `${successfulQueries} completed request${successfulQueries === 1 ? "" : "s"} recorded in this session.`
+                  : "Runtime availability is verified when a request reaches Ollama."}
+              </p>
+            </div>
           </div>
-          <div className="glass grid items-center gap-3 rounded-2xl p-4 sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1.2fr] sm:p-6">
-            <FlowStep index="01" label="User Query" icon={CircleUserRound} />
-            <ArrowUpRight
-              className="hidden text-slate-600 sm:block"
-              size={16}
-            />
-            <FlowStep index="02" label="Small Model" icon={Cpu} />
-            <ArrowUpRight
-              className="hidden text-slate-600 sm:block"
-              size={16}
-            />
-            <FlowStep index="03" label="Confidence Check" icon={Gauge} />
-            <ArrowUpRight
-              className="hidden text-slate-600 sm:block"
-              size={16}
-            />
-            <FlowStep index="04" label="Large Model" icon={Layers3} />
-            <p className="col-span-full mt-2 border-t border-white/[.08] pt-4 font-mono text-[9px] text-slate-600">
-              Escalates only when the answer needs more certainty.
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={() => navigate("/playground")}
+            className="button-primary group inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium"
+          >
+            Open playground
+            <ArrowUpRight size={14} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+          </button>
         </section>
+
+        <section className="grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              label: "Session requests",
+              value: successfulQueries,
+              note: "Completed in this tab",
+            },
+            {
+              label: "Escalation rate",
+              value: successfulQueries
+                ? `${((escalatedQueries / successfulQueries) * 100).toFixed(0)}%`
+                : "—",
+              note: successfulQueries ? `${escalatedQueries} routed to 7B` : "No session data yet",
+            },
+            {
+              label: "Average response",
+              value: averageResponseTime === null ? "—" : formatDuration(averageResponseTime),
+              note: "Measured for this session",
+            },
+          ].map((metric) => (
+            <div key={metric.label} className="glass metric-panel rounded-xl p-4">
+              <p className="eyebrow-label">{metric.label}</p>
+              <p className="mt-3 font-display text-2xl text-slate-100">{metric.value}</p>
+              <p className="mt-1 text-[11px] text-slate-500">{metric.note}</p>
+            </div>
+          ))}
+        </section>
+
+        <div className="mt-5 grid gap-5 xl:grid-cols-[1.05fr_.95fr]">
+          <section className="glass rounded-2xl p-5 sm:p-6">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow-label">Routing infrastructure</p>
+                <h2 className="mt-2 font-display text-lg text-slate-100">Configured models</h2>
+              </div>
+              <button type="button" onClick={() => navigate("/models")} className="text-xs text-amber-200/80 transition hover:text-amber-100">
+                View models <ArrowUpRight className="ml-1 inline" size={13} />
+              </button>
+            </div>
+            <div className="mt-5 divide-y divide-white/[.07]">
+              {configuredModels.map((model, index) => {
+                const verified = activity.some(
+                  (item) => item.model === model.name || (index === 0 && item.escalated),
+                );
+                return (
+                  <div key={model.name} className="model-row flex items-center gap-4 py-4 first:pt-0 last:pb-0">
+                    <span className={`model-glyph ${index === 1 ? "model-glyph-large" : ""}`}>
+                      <Cpu size={17} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-slate-100">{model.name}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">{model.role}</p>
+                    </div>
+                    <span className="model-state">
+                      <span className={verified ? "status-beacon status-beacon-active" : "status-beacon"} />
+                      {verified ? "Verified this session" : "Configured"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-5 border-t border-white/[.07] pt-4 text-[11px] text-slate-500">
+              Hardware utilization is not reported by the current Ollama API integration.
+            </p>
+          </section>
+
+          <section className="glass rounded-2xl p-5 sm:p-6">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow-label">Benchmark archive</p>
+                <h2 className="mt-2 font-display text-lg text-slate-100">Latest recorded run</h2>
+              </div>
+              <span className="font-mono text-[10px] text-slate-500">
+                {formatBenchmarkDate(benchmarkRun.timestamp)}
+              </span>
+            </div>
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              {[
+                ["Queries", benchmarkSummary.total_queries ?? benchmarkRun.total_queries],
+                ["Succeeded", benchmarkSummary.successful_queries],
+                ["Average", `${benchmarkSummary.average_response_time}s`],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-white/[.06] bg-white/[.02] p-3">
+                  <p className="eyebrow-label">{label}</p>
+                  <p className="mt-2 font-display text-lg text-slate-100">{value}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 flex items-center justify-between border-t border-white/[.07] pt-4 text-xs">
+              <span className="text-slate-400">3B / 7B routes</span>
+              <span className="font-mono text-slate-300">
+                {benchmarkSummary["3b_count"]} <span className="text-slate-600">/</span> {benchmarkSummary["7b_count"]}
+              </span>
+            </div>
+            <p className="mt-2 text-[10px] leading-5 text-slate-600">
+              Recorded benchmark snapshot; this is not live session telemetry.
+            </p>
+          </section>
+        </div>
+
+        <div className="mt-5 grid gap-5 xl:grid-cols-[1.1fr_.9fr]">
+          <section className="glass rounded-2xl p-5 sm:p-6">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow-label">This browser session</p>
+                <h2 className="mt-2 font-display text-lg text-slate-100">Recent requests</h2>
+              </div>
+              <button type="button" onClick={() => navigate("/analytics")} className="text-xs text-amber-200/80 transition hover:text-amber-100">
+                Session analytics <ArrowUpRight className="ml-1 inline" size={13} />
+              </button>
+            </div>
+            {activity.length ? (
+              <div className="mt-5 divide-y divide-white/[.07]">
+                {activity.slice(0, 4).map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                    <span className={`route-indicator ${item.escalated ? "route-indicator-escalated" : ""}`} />
+                    <p className="min-w-0 flex-1 truncate text-xs text-slate-300">{item.query}</p>
+                    <span className="shrink-0 font-mono text-[10px] text-slate-500">{item.model}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-slate-400">{formatDuration(item.timing.total_ms)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-5 rounded-xl border border-dashed border-white/[.1] px-4 py-6 text-center text-xs text-slate-500">
+                Completed prompts will appear here after your first Playground request.
+              </p>
+            )}
+          </section>
+
+          <section className="glass rounded-2xl p-5 sm:p-6">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow-label">Verified benchmark data</p>
+                <h2 className="mt-2 font-display text-lg text-slate-100">Recorded samples</h2>
+              </div>
+              <span className="font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                {benchmarkSamples.length} of {benchmarkRun.total_queries}
+              </span>
+            </div>
+            <div className="mt-4 divide-y divide-white/[.07]">
+              {benchmarkSamples.map((sample) => (
+                <div key={`${sample.id}-${sample.category}`} className="flex items-center gap-3 py-3">
+                  <span className="benchmark-category">{sample.category}</span>
+                  <p className="min-w-0 flex-1 truncate text-xs text-slate-300">{sample.query}</p>
+                  <span className="font-mono text-[10px] text-slate-500">{sample.response_time_seconds}s</span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[10px] text-slate-600">
+              Samples are from the recorded run dated {formatBenchmarkDate(benchmarkRun.timestamp)}.
+            </p>
+          </section>
+        </div>
       </div>
     </main>
-  );
-}
-
-function FlowStep({ index, label, icon: Icon }) {
-  return (
-    <div className="flex items-center gap-3 sm:block">
-      <div className="mb-0 flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[.035] text-sky-300 sm:mb-4">
-        <Icon size={17} strokeWidth={1.5} />
-      </div>
-      <div>
-        <span className="font-mono text-[9px] text-slate-600">{index}</span>
-        <p className="mt-1 text-xs text-slate-300">{label}</p>
-      </div>
-    </div>
   );
 }
 
@@ -345,13 +454,44 @@ function PlaygroundFlow() {
   );
 }
 
-function Playground() {
+function Playground({ onRequestComplete }) {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
+  const [attachment, setAttachment] = useState(null);
+  const [submittedAttachmentName, setSubmittedAttachmentName] = useState("");
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [status, setStatus] = useState("idle");
   const activeRequest = useRef(null);
+  const attachmentInput = useRef(null);
+
+  const selectAttachment = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!/\.(txt|md|csv|json|ya?ml|py|js|jsx|ts|tsx|html|css|xml|log)$/i.test(file.name)) {
+      setErrorMessage("Choose a supported text, data, or source-code file.");
+      setStatus("error");
+      event.target.value = "";
+      return;
+    }
+    if (file.size > 32 * 1024) {
+      setErrorMessage("Text attachments must be 32 KB or smaller.");
+      setStatus("error");
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      setAttachment({ name: file.name, text: await file.text() });
+      setErrorMessage("");
+      if (status === "error") setStatus("idle");
+    } catch (error) {
+      setErrorMessage(`Could not read the selected attachment: ${error.message}`);
+      setStatus("error");
+      event.target.value = "";
+    }
+  };
 
   const submitQuery = async (event) => {
     event.preventDefault();
@@ -362,19 +502,31 @@ function Playground() {
       return;
     }
 
+    const prompt = attachment
+      ? `${trimmedQuery}\n\n--- Attached text: ${attachment.name} ---\n${attachment.text}`
+      : trimmedQuery;
     setSubmittedQuery(trimmedQuery);
+    setSubmittedAttachmentName(attachment?.name ?? "");
     setResult(null);
     setErrorMessage("");
     setStatus("loading");
     const controller = new AbortController();
     activeRequest.current = controller;
+    const markStoppedIfCurrent = () => {
+      if (activeRequest.current === null || activeRequest.current === controller) {
+        setStatus("stopped");
+      }
+    };
     let responseText = "";
     let completed = false;
+    let routing = null;
+    let timeToFirstTokenMs = null;
+    const requestStartedAt = performance.now();
     try {
       const response = await fetch("/api/query/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: trimmedQuery }),
+        body: JSON.stringify({ query: prompt }),
         signal: controller.signal,
       });
       if (!response.ok) {
@@ -393,6 +545,7 @@ function Playground() {
           break;
         }
         if (eventData.event === "routing") {
+          routing = eventData.data;
           setResult({
             response: responseText,
             ...eventData.data,
@@ -405,6 +558,9 @@ function Playground() {
             throw new Error("The response stream contained invalid buffered text.");
           }
           responseText += eventData.data.text;
+          if (timeToFirstTokenMs === null && eventData.data.text.length > 0) {
+            timeToFirstTokenMs = performance.now() - requestStartedAt;
+          }
           setResult((current) =>
             current ? { ...current, response: responseText } : current,
           );
@@ -413,12 +569,35 @@ function Playground() {
             throw new Error("The response stream contained an invalid token.");
           }
           responseText += eventData.data.token;
+          if (timeToFirstTokenMs === null && eventData.data.token.length > 0) {
+            timeToFirstTokenMs = performance.now() - requestStartedAt;
+          }
           setResult((current) =>
             current ? { ...current, response: responseText } : current,
           );
         } else if (eventData.event === "complete") {
+          if (timeToFirstTokenMs === null) {
+            throw new Error("The response stream completed without a generated token.");
+          }
+          const timing = {
+            ...eventData.data.timing,
+            total_ms: Math.round((performance.now() - requestStartedAt) * 100) / 100,
+            time_to_first_token_ms:
+              Math.round(timeToFirstTokenMs * 100) / 100,
+          };
+          onRequestComplete({
+            id: `${Date.now()}-${trimmedQuery.length}`,
+            query: trimmedQuery,
+            model: routing?.model,
+            confidence: routing?.confidence,
+            escalated: routing?.escalated,
+            timing,
+            completedAt: new Date().toISOString(),
+          });
+          setAttachment(null);
+          if (attachmentInput.current) attachmentInput.current.value = "";
           setResult((current) =>
-            current ? { ...current, timing: eventData.data.timing } : current,
+            current ? { ...current, timing } : current,
           );
           completed = true;
           setStatus("success");
@@ -428,13 +607,16 @@ function Playground() {
           );
         }
       }
-      if (!completed && !controller.signal.aborted) {
+      if (controller.signal.aborted) {
+        markStoppedIfCurrent();
+      } else if (!completed) {
         throw new Error("The response stream ended before generation completed.");
       }
     } catch (error) {
       if (controller.signal.aborted) {
-        setStatus("stopped");
+        markStoppedIfCurrent();
       } else {
+        controller.abort();
         setErrorMessage(
           error instanceof TypeError
             ? "The connection to Cascadia was lost. Check that the local backend is running."
@@ -449,9 +631,12 @@ function Playground() {
     }
   };
 
-  const stopGeneration = () => {
-    activeRequest.current?.abort();
+  const stopGeneration = (event) => {
+    event.preventDefault();
+    const controller = activeRequest.current;
+    activeRequest.current = null;
     setStatus("stopped");
+    controller?.abort();
   };
 
   const selectExample = (example) => {
@@ -461,31 +646,20 @@ function Playground() {
   };
 
   return (
-    <main className="relative overflow-hidden px-5 pb-16 pt-10 sm:px-10 md:px-14 md:pt-16">
-      <div className="hero-grid pointer-events-none absolute inset-0 h-[38rem] opacity-50" />
-      <div className="orb pointer-events-none" />
-      <div className="relative mx-auto max-w-6xl">
-        <div className="mb-12 max-w-3xl animate-rise">
-          <div className="mb-6 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[.28em] text-sky-300/70">
-            <span className="h-px w-8 bg-sky-400/50" />
-            Local inference workspace
-          </div>
-          <h1 className="font-display text-4xl font-medium tracking-[-.045em] text-slate-50 sm:text-6xl">
-            AI{" "}
-            <span className="bg-gradient-to-r from-blue-300 to-violet-400 bg-clip-text text-transparent">
-              PLAYGROUND
-            </span>
-          </h1>
-          <p className="mt-5 max-w-lg text-sm leading-7 text-slate-400 sm:text-base">
-            Ask anything. Your query is routed across local models.
+    <main className="page-wrap">
+      <div className="page-content max-w-6xl">
+        <PageHeader eyebrow="PRIVATE BY DESIGN / LOCAL INFERENCE" title="Playground">
+          <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">
+            One workspace for thoughtful answers, routed across your local
+            Qwen models.
           </p>
-        </div>
+        </PageHeader>
 
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_16rem] xl:items-start">
           <section className="min-w-0">
             <form
               onSubmit={submitQuery}
-              className="glass rounded-2xl p-3 sm:p-4"
+              className="chat-composer glass rounded-2xl p-3 sm:p-4"
             >
               <label htmlFor="playground-query" className="sr-only">
                 Ask Cascadia anything
@@ -500,26 +674,63 @@ function Playground() {
                     setStatus("idle");
                   }
                 }}
-                rows={4}
-                className="w-full resize-none bg-transparent px-3 py-2 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
+                rows={3}
+                placeholder="Message Cascadia…"
+                className="chat-input w-full resize-none bg-transparent px-3 py-3 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
               />
+              {attachment && (
+                <div className="attachment-chip">
+                  <Paperclip size={13} />
+                  <span>{attachment.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttachment(null);
+                      if (attachmentInput.current) attachmentInput.current.value = "";
+                    }}
+                    aria-label={`Remove ${attachment.name}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
               <div className="flex items-center justify-between gap-3 border-t border-white/[.08] px-3 pt-3">
-                <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                  Small model: qwen2.5:3b
-                </span>
+                <div className="flex min-w-0 items-center gap-3">
+                  <input
+                    ref={attachmentInput}
+                    type="file"
+                    accept=".txt,.md,.csv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.log"
+                    onChange={selectAttachment}
+                    className="sr-only"
+                    aria-label="Choose a text attachment"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => attachmentInput.current?.click()}
+                    disabled={status === "loading" || status === "streaming"}
+                    className="composer-tool inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px]"
+                  >
+                    <Paperclip size={13} />
+                    Attach text
+                  </button>
+                  <span className="hidden font-mono text-[9px] uppercase tracking-wider text-slate-600 sm:inline">
+                    Local cascade <span className="mx-1 text-slate-700">/</span>{" "}
+                    3B → 7B
+                  </span>
+                </div>
                 {status === "loading" || status === "streaming" ? (
                   <button
                     type="button"
                     onClick={stopGeneration}
-                    className="inline-flex items-center gap-2 rounded-lg border border-rose-300/30 bg-rose-300/[.08] px-4 py-2.5 text-xs font-medium text-rose-200 transition hover:border-rose-200/70 hover:bg-rose-300/[.14]"
+                    className="button-stop inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium"
                   >
                     <X size={14} />
-                    Stop generation
+                    Stop
                   </button>
                 ) : (
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-2 rounded-lg border border-sky-300/35 bg-sky-300/[.1] px-4 py-2.5 text-xs font-medium text-sky-100 transition hover:border-sky-200/70 hover:bg-sky-300/[.16]"
+                    className="button-primary inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium"
                   >
                     <Send size={14} />
                     Send
@@ -528,22 +739,48 @@ function Playground() {
               </div>
             </form>
 
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="mr-1 font-mono text-[9px] uppercase tracking-wider text-slate-600">
+                Try
+              </span>
               {exampleQueries.map((example) => (
                 <button
                   key={example}
                   type="button"
                   onClick={() => selectExample(example)}
                   disabled={status === "loading" || status === "streaming"}
-                  className="rounded-full border border-white/[.1] bg-white/[.025] px-3 py-2 text-left text-[11px] text-slate-400 transition hover:border-sky-300/30 hover:text-slate-200"
+                  className="suggestion-chip rounded-full px-3 py-2 text-left text-[11px] text-slate-400"
                 >
                   {example}
                 </button>
               ))}
             </div>
 
+            {submittedQuery && status !== "idle" && (
+              <article className="chat-message chat-message-user animate-rise mt-8">
+                <span
+                  className="message-avatar message-avatar-user"
+                  aria-hidden="true"
+                >
+                  <CircleUserRound size={16} />
+                </span>
+                <div className="min-w-0">
+                  <p className="message-author">You</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-200">
+                    {submittedQuery}
+                  </p>
+                  {submittedAttachmentName && (
+                    <span className="attachment-chip mt-3">
+                      <Paperclip size={13} />
+                      {submittedAttachmentName}
+                    </span>
+                  )}
+                </div>
+              </article>
+            )}
+
             {status === "error" && (
-              <div className="mt-6 flex items-start gap-3 rounded-xl border border-rose-300/20 bg-rose-300/[.05] p-4 text-xs text-rose-200">
+              <div className="error-banner mt-5 flex items-start gap-3 rounded-xl p-4 text-xs">
                 <PanelLeftClose size={16} className="mt-0.5 shrink-0" />
                 <div>
                   <p className="font-medium">
@@ -555,36 +792,44 @@ function Playground() {
             )}
 
             {status === "idle" && (
-              <div className="mt-20 text-center sm:mt-24">
-                <Sparkles size={20} className="mx-auto text-sky-300/50" />
-                <p className="mt-4 font-display text-lg text-slate-300">
-                  Your next answer starts here.
+              <div className="chat-welcome mt-10">
+                <span className="welcome-glyph">
+                  <Sparkles size={18} />
+                </span>
+                <p className="mt-4 font-display text-lg text-slate-200">
+                  What would you like to explore?
                 </p>
-                <p className="mt-2 text-xs text-slate-600">
-                  Your question will be sent to the local model.
+                <p className="mt-2 text-xs text-slate-500">
+                  Your prompt stays on your machine and is routed locally.
                 </p>
               </div>
             )}
             {status === "loading" && (
-              <div className="mt-16 text-center sm:mt-20">
-                <LoaderCircle
-                  size={22}
-                  className="mx-auto animate-spin text-sky-300"
-                />
-                <p className="mt-4 font-display text-lg text-slate-300">
-                  Routing your query locally...
-                </p>
-                <p className="mt-2 text-xs text-slate-600">
-                  Your query is being processed locally.
-                </p>
+              <div className="assistant-message mt-8 animate-rise">
+                <span
+                  className="message-avatar message-avatar-assistant"
+                  aria-hidden="true"
+                >
+                  <Sparkles size={15} />
+                </span>
+                <div>
+                  <p className="message-author">Cascadia</p>
+                  <div className="mt-3 inline-flex items-center gap-2 text-xs text-slate-400">
+                    <LoaderCircle
+                      size={14}
+                      className="animate-spin text-amber-300"
+                    />
+                    Evaluating the local model response…
+                  </div>
+                </div>
               </div>
             )}
             {status === "stopped" && !result && (
-              <div className="mt-16 text-center sm:mt-20">
+              <div className="mt-8 rounded-xl border border-white/[.08] bg-white/[.02] p-4">
                 <p className="font-display text-lg text-slate-300">
                   Generation stopped.
                 </p>
-                <p className="mt-2 text-xs text-slate-600">
+                <p className="mt-2 text-xs text-slate-500">
                   The local model request was cancelled.
                 </p>
               </div>
@@ -594,35 +839,22 @@ function Playground() {
               status === "stopped" ||
               (status === "error" && result?.response)) &&
               result && (
-              <div className="mt-10 space-y-5 animate-rise">
+              <div className="assistant-response mt-8 space-y-4 animate-rise">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-mono text-[9px] uppercase tracking-[.24em] text-slate-600">
-                      Inference details
+                      Cascadia
                     </p>
-                    <h2 className="mt-2 font-display text-xl text-slate-100">
-                      {status === "streaming"
-                        ? result.responseMode === "buffered"
-                          ? "Displaying buffered response..."
-                          : "Generating response..."
-                        : status === "stopped"
-                          ? "Generation stopped"
-                          : status === "error"
-                            ? "Response interrupted"
-                            : "Response ready"}
-                    </h2>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {result.model}
+                    </p>
                   </div>
-                  <span
-                    className={`rounded-full border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider ${
-                      status === "success"
-                        ? "border-emerald-300/20 bg-emerald-300/[.06] text-emerald-300"
-                        : "border-sky-300/20 bg-sky-300/[.06] text-sky-200"
-                    }`}
-                  >
+                  <span className={`response-state ${status === "success" ? "response-state-complete" : ""}`}>
+                    <span className="status-beacon" />
                     {status === "streaming"
                       ? result.responseMode === "buffered"
                         ? "Buffered replay"
-                        : "Generating"
+                        : "Streaming"
                       : status === "stopped"
                         ? "Stopped"
                         : status === "error"
@@ -630,8 +862,15 @@ function Playground() {
                           : "Complete"}
                   </span>
                 </div>
-                <div className="glass rounded-2xl p-5 sm:p-6">
-                  <div className="grid gap-5 sm:grid-cols-3">
+                <details className="glass inference-details rounded-2xl">
+                  <summary>
+                    <span>Inference telemetry</span>
+                    <span className="telemetry-summary">
+                      {(result.confidence * 100).toFixed(0)}% confidence
+                    </span>
+                  </summary>
+                  <div className="telemetry-grid">
+                    <div className="grid gap-5 sm:grid-cols-3">
                     <div>
                       <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
                         Selected model
@@ -712,14 +951,19 @@ function Playground() {
                     </p>
                   </div>
                 </div>
-                <div className="glass rounded-2xl p-5 sm:p-6">
-                  <div className="mb-5 flex items-center justify-between gap-4">
-                    <p className="font-mono text-[9px] uppercase tracking-[.2em] text-slate-600">
-                      Response
-                    </p>
-                    <span className="max-w-[55%] truncate text-[10px] text-slate-600">
-                      {submittedQuery}
-                    </span>
+                </details>
+                <div className="assistant-answer glass rounded-2xl p-5 sm:p-6">
+                <div className="mb-5 flex items-center justify-between gap-4">
+                  <p className="font-mono text-[9px] uppercase tracking-[.2em] text-slate-600">
+                    Response
+                  </p>
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-slate-500">
+                    {status === "streaming"
+                      ? result.responseMode === "buffered"
+                        ? "Buffered replay"
+                        : "Live generation"
+                      : "Model output"}
+                  </span>
                   </div>
                   <div className="markdown-content text-sm leading-7 text-slate-300">
                     {result.response ? (
@@ -731,10 +975,10 @@ function Playground() {
                         {result.responseMode === "buffered"
                           ? "Displaying the buffered response"
                           : "Generating the first tokens"}
-                        <span className="ml-1 inline-flex gap-1 align-middle">
-                          <span className="h-1 w-1 animate-bounce rounded-full bg-sky-300 [animation-delay:-.3s]" />
-                          <span className="h-1 w-1 animate-bounce rounded-full bg-blue-300 [animation-delay:-.15s]" />
-                          <span className="h-1 w-1 animate-bounce rounded-full bg-violet-300" />
+                        <span className="stream-dots" aria-hidden="true">
+                          <span />
+                          <span />
+                          <span />
                         </span>
                       </p>
                     ) : (
@@ -751,7 +995,7 @@ function Playground() {
                             ? "Displaying buffered response"
                             : "Generating"
                         }
-                        className="ml-1 inline-block h-3 w-1 animate-pulse rounded-full bg-sky-300 align-middle"
+                        className="stream-caret"
                       />
                     )}
                   </div>
@@ -759,7 +1003,7 @@ function Playground() {
               </div>
             )}
           </section>
-          <aside className="lg:pt-1">
+          <aside className="xl:sticky xl:top-8">
             <PlaygroundFlow />
           </aside>
         </div>
@@ -768,41 +1012,14 @@ function Playground() {
   );
 }
 
-const demoModels = [
-  {
-    name: "Llama 3.2 3B",
-    tier: "Small",
-    size: "3B parameters",
-    use: "Fast answers, classification, and everyday questions.",
-    usage: "Low",
-    accent: "text-cyan-300 border-cyan-300/25 bg-cyan-300/[.06]",
-  },
-  {
-    name: "Phi-3 Mini",
-    tier: "Small",
-    size: "3.8B parameters",
-    use: "Efficient reasoning and lightweight local tasks.",
-    usage: "Low",
-    accent: "text-sky-300 border-sky-300/25 bg-sky-300/[.06]",
-  },
-  {
-    name: "Mistral 7B",
-    tier: "Large",
-    size: "7B parameters",
-    use: "Complex reasoning and higher-accuracy responses.",
-    usage: "Medium",
-    accent: "text-violet-300 border-violet-300/25 bg-violet-300/[.06]",
-  },
-];
-
 function PageHeader({ eyebrow, title, children }) {
   return (
-    <div className="mb-12 max-w-3xl animate-rise">
-      <div className="mb-6 flex items-center gap-3 font-mono text-[10px] uppercase tracking-[.28em] text-sky-300/70">
-        <span className="h-px w-8 bg-sky-400/50" />
+    <div className="page-header animate-rise">
+      <div className="eyebrow-label mb-5 flex items-center gap-3">
+        <span className="eyebrow-line" />
         {eyebrow}
       </div>
-      <h1 className="font-display text-4xl font-medium tracking-[-.045em] text-slate-50 sm:text-6xl">
+      <h1 className="font-display text-4xl font-medium tracking-[-.045em] text-slate-50 sm:text-5xl">
         {title}
       </h1>
       {children}
@@ -810,103 +1027,97 @@ function PageHeader({ eyebrow, title, children }) {
   );
 }
 
-function Models() {
-  const [enabled, setEnabled] = useState(() => demoModels.map(() => true));
-
-  const toggleModel = (index) => {
-    setEnabled((current) =>
-      current.map((isEnabled, itemIndex) =>
-        itemIndex === index ? !isEnabled : isEnabled,
-      ),
-    );
-  };
-
+function Models({ activity }) {
   return (
-    <main className="relative overflow-hidden px-5 pb-16 pt-10 sm:px-10 md:px-14 md:pt-16">
-      <div className="hero-grid pointer-events-none absolute inset-0 h-[38rem] opacity-50" />
-      <div className="orb pointer-events-none" />
-      <div className="relative mx-auto max-w-6xl">
-        <PageHeader
-          eyebrow="Model registry / demo configuration"
-          title="AVAILABLE MODELS"
-        >
-          <p className="mt-5 max-w-lg text-sm leading-7 text-slate-400 sm:text-base">
-            Configure the local model options Cascadia can consider for each
-            request.
+    <main className="page-wrap">
+      <div className="page-content max-w-6xl">
+        <PageHeader eyebrow="LOCAL REGISTRY / ROUTER CONFIGURATION" title="Models">
+          <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">
+            The models currently configured in Cascadia’s local inference
+            pipeline.
           </p>
         </PageHeader>
-        <div className="mb-7 flex items-center justify-between gap-4 border-b border-white/[.08] pb-4">
-          <p className="font-mono text-[9px] uppercase tracking-[.2em] text-slate-600">
-            Demo / configured models
+
+        <div className="model-grid grid gap-4 lg:grid-cols-2">
+          {configuredModels.map((model, index) => {
+            const selectedCount = activity.filter(
+              (item) => item.model === model.name,
+            ).length;
+            const verified =
+              index === 0
+                ? activity.length > 0
+                : selectedCount > 0;
+            const benchmarkCount =
+              index === 0
+                ? benchmarkRun.summary["3b_count"]
+                : benchmarkRun.summary["7b_count"];
+            return (
+              <article key={model.name} className="glass model-card rounded-2xl p-5 sm:p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <span className={`model-glyph ${index === 1 ? "model-glyph-large" : ""}`}>
+                    <Cpu size={19} strokeWidth={1.5} />
+                  </span>
+                  <span className={`model-state ${verified ? "model-state-verified" : ""}`}>
+                    <span className={`status-beacon ${verified ? "status-beacon-active" : ""}`} />
+                    {verified ? "Verified this session" : "Configured · not exercised"}
+                  </span>
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-baseline justify-between gap-3">
+                  <div>
+                    <h2 className="font-display text-xl text-slate-100">{model.name}</h2>
+                    <p className="mt-1 text-xs text-slate-500">{model.size}</p>
+                  </div>
+                  <span className="role-chip">
+                    {index === 0 ? "Primary · preflight" : "Escalation"}
+                  </span>
+                </div>
+
+                <p className="mt-5 min-h-10 text-sm leading-6 text-slate-400">
+                  {model.role}
+                </p>
+
+                <dl className="model-facts mt-5 grid grid-cols-2 gap-3 border-t border-white/[.07] pt-4">
+                  <div>
+                    <dt className="eyebrow-label">Selected this session</dt>
+                    <dd>{selectedCount}</dd>
+                  </div>
+                  <div>
+                    <dt className="eyebrow-label">Recorded benchmark</dt>
+                    <dd>{benchmarkCount} responses</dd>
+                  </div>
+                  <div>
+                    <dt className="eyebrow-label">CPU utilization</dt>
+                    <dd>Not reported</dd>
+                  </div>
+                  <div>
+                    <dt className="eyebrow-label">Memory usage</dt>
+                    <dd>Not reported</dd>
+                  </div>
+                </dl>
+              </article>
+            );
+          })}
+        </div>
+
+        <section className="glass mt-5 rounded-2xl p-5 sm:p-6">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow-label">Routing behavior</p>
+              <h2 className="mt-2 font-display text-lg text-slate-100">Selection is managed by the backend</h2>
+            </div>
+            <span className="role-chip">3B → confidence check → 7B if needed</span>
+          </div>
+          <p className="mt-4 max-w-3xl text-xs leading-6 text-slate-500">
+            Model enablement and the confidence threshold are controlled by the
+            Flask router. Availability is confirmed only when a live request
+            completes; hardware utilization is not part of the current API
+            response.
           </p>
-          <span className="rounded-full border border-amber-300/20 bg-amber-300/[.05] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-amber-200/70">
-            Not installed
-          </span>
-        </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          {demoModels.map((model, index) => (
-            <article
-              key={model.name}
-              className={`glass rounded-2xl p-5 transition ${enabled[index] ? "" : "opacity-65"}`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl border ${model.accent}`}
-                >
-                  <Cpu size={18} strokeWidth={1.5} />
-                </div>
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-mono text-[9px] uppercase tracking-wider ${enabled[index] ? "border-emerald-300/20 bg-emerald-300/[.05] text-emerald-300" : "border-slate-400/15 bg-white/[.03] text-slate-500"}`}
-                >
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${enabled[index] ? "bg-emerald-400" : "bg-slate-600"}`}
-                  />
-                  {enabled[index] ? "Ready" : "Offline"}
-                </span>
-              </div>
-              <div className="mt-6 flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="font-display text-lg text-slate-100">
-                    {model.name}
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-500">{model.size}</p>
-                </div>
-                <span className="rounded border border-white/10 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-slate-400">
-                  {model.tier} model
-                </span>
-              </div>
-              <dl className="mt-7 space-y-4 border-t border-white/[.08] pt-5">
-                <div>
-                  <dt className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                    Intended use
-                  </dt>
-                  <dd className="mt-1.5 text-xs leading-5 text-slate-400">
-                    {model.use}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between">
-                  <dt className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                    Resource usage
-                  </dt>
-                  <dd className="text-xs text-slate-300">{model.usage}</dd>
-                </div>
-              </dl>
-              <button
-                type="button"
-                aria-pressed={enabled[index]}
-                onClick={() => toggleModel(index)}
-                className={`mt-7 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-xs transition ${enabled[index] ? "border-sky-300/25 bg-sky-300/[.07] text-sky-100 hover:bg-sky-300/[.13]" : "border-white/10 bg-white/[.025] text-slate-500 hover:text-slate-300"}`}
-              >
-                {enabled[index] && <Check size={14} />}
-                {enabled[index] ? "Disable model" : "Enable model"}
-              </button>
-            </article>
-          ))}
-        </div>
-        <p className="mt-6 font-mono text-[9px] leading-relaxed text-slate-600">
-          These are demo configurations for the Cascadia interface. No model
-          files have been installed or connected.
-        </p>
+          <p className="mt-3 text-[10px] text-slate-600">
+            Benchmark counts are from the recorded run dated {formatBenchmarkDate(benchmarkRun.timestamp)}.
+          </p>
+        </section>
       </div>
     </main>
   );
@@ -958,138 +1169,51 @@ function RoutingDiagram() {
 }
 
 function Routing() {
-  const [threshold, setThreshold] = useState(70);
-  const [smallModel, setSmallModel] = useState("Llama 3.2 3B");
-  const [largeModel, setLargeModel] = useState("Mistral 7B");
-  const [automaticEscalation, setAutomaticEscalation] = useState(true);
-  const [fallback, setFallback] = useState("Keep on small model");
-
   return (
-    <main className="relative overflow-hidden px-5 pb-16 pt-10 sm:px-10 md:px-14 md:pt-16">
-      <div className="hero-grid pointer-events-none absolute inset-0 h-[38rem] opacity-50" />
-      <div className="orb pointer-events-none" />
-      <div className="relative mx-auto max-w-6xl">
-        <PageHeader
-          eyebrow="Routing policy / local configuration"
-          title="ROUTING CONFIGURATION"
-        >
-          <p className="mt-5 max-w-lg text-sm leading-7 text-slate-400 sm:text-base">
-            Tune how Cascadia decides when a request needs a larger model.
+    <main className="page-wrap">
+      <div className="page-content max-w-6xl">
+        <PageHeader eyebrow="ROUTER POLICY / BACKEND CONTROLLED" title="Routing">
+          <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">
+            A transparent view of the active two-stage model path.
           </p>
         </PageHeader>
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
-          <section className="space-y-5">
-            <div className="glass rounded-2xl p-5 sm:p-7">
-              <div className="flex items-start justify-between gap-5">
-                <div>
-                  <p className="font-mono text-[9px] uppercase tracking-[.24em] text-slate-600">
-                    Confidence threshold
-                  </p>
-                  <h2 className="mt-3 font-display text-3xl text-slate-100">
-                    {threshold}%
-                  </h2>
-                </div>
-                <SlidersHorizontal className="text-sky-300/60" size={20} />
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+          <section className="space-y-4">
+            <article className="glass rounded-2xl p-5 sm:p-6">
+              <p className="eyebrow-label">Confidence threshold</p>
+              <div className="mt-4 flex flex-wrap items-baseline justify-between gap-3">
+                <h2 className="font-display text-3xl text-slate-100">70%</h2>
+                <span className="role-chip">Default · backend configurable</span>
               </div>
-              <input
-                aria-label="Confidence threshold"
-                type="range"
-                min="0"
-                max="100"
-                value={threshold}
-                onChange={(event) => setThreshold(Number(event.target.value))}
-                className="mt-7 w-full accent-sky-300"
-              />
-              <div className="mt-2 flex justify-between font-mono text-[9px] text-slate-600">
-                <span>0%</span>
-                <span>100%</span>
-              </div>
-              <div className="mt-7 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-emerald-300/15 bg-emerald-300/[.04] p-4">
-                  <p className="font-mono text-[9px] uppercase tracking-wider text-emerald-300">
-                    Confidence &gt;= {threshold}%
-                  </p>
-                  <p className="mt-2 text-xs leading-5 text-slate-300">
-                    Keep request on Small Model
-                  </p>
-                </div>
-                <div className="rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4">
-                  <p className="font-mono text-[9px] uppercase tracking-wider text-amber-200/80">
-                    Confidence &lt; {threshold}%
-                  </p>
-                  <p className="mt-2 text-xs leading-5 text-slate-300">
-                    Escalate to Large Model
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="glass rounded-2xl p-5 sm:p-7">
-              <p className="mb-6 font-mono text-[9px] uppercase tracking-[.24em] text-slate-600">
-                Model policy
+              <p className="mt-3 text-xs leading-6 text-slate-500">
+                The router keeps responses at or above the configured
+                confidence threshold on 3B and escalates lower-confidence
+                responses to 7B. Set{" "}
+                <code className="text-amber-100/80">CASCADIA_CONFIDENCE_THRESHOLD</code>{" "}
+                in the backend environment to override the default.
               </p>
-              <div className="grid gap-5 sm:grid-cols-2">
-                <label className="block">
-                  <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                    Small model
-                  </span>
-                  <select
-                    value={smallModel}
-                    onChange={(event) => setSmallModel(event.target.value)}
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-[#0a1725] px-3 py-2.5 text-xs text-slate-200 outline-none"
-                  >
-                    <option>Llama 3.2 3B</option>
-                    <option>Phi-3 Mini</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                    Large model
-                  </span>
-                  <select
-                    value={largeModel}
-                    onChange={(event) => setLargeModel(event.target.value)}
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-[#0a1725] px-3 py-2.5 text-xs text-slate-200 outline-none"
-                  >
-                    <option>Mistral 7B</option>
-                    <option>Llama 3.2 3B</option>
-                  </select>
-                </label>
-              </div>
-              <div className="mt-6 border-t border-white/[.08] pt-5">
-                <label className="flex cursor-pointer items-center justify-between gap-4">
-                  <span>
-                    <span className="block text-xs text-slate-300">
-                      Automatic escalation
+            </article>
+            <article className="glass rounded-2xl p-5 sm:p-6">
+              <p className="eyebrow-label">Configured models</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {configuredModels.map((model, index) => (
+                  <div key={model.name} className="route-model-card">
+                    <span className={`model-glyph ${index === 1 ? "model-glyph-large" : ""}`}>
+                      <Cpu size={16} />
                     </span>
-                    <span className="mt-1 block text-[11px] text-slate-600">
-                      Send low-confidence requests to the Large Model.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={automaticEscalation}
-                    onChange={(event) =>
-                      setAutomaticEscalation(event.target.checked)
-                    }
-                    className="h-4 w-4 accent-sky-300"
-                  />
-                </label>
-                <label className="mt-6 block">
-                  <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                    Fallback behavior
-                  </span>
-                  <select
-                    value={fallback}
-                    onChange={(event) => setFallback(event.target.value)}
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-[#0a1725] px-3 py-2.5 text-xs text-slate-200 outline-none"
-                  >
-                    <option>Keep on small model</option>
-                    <option>Escalate to large model</option>
-                    <option>Return a routing error</option>
-                  </select>
-                </label>
+                    <div className="mt-3">
+                      <p className="text-sm text-slate-100">{model.name}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">{model.role}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            </div>
+            </article>
+            <p className="px-1 text-[10px] leading-5 text-slate-600">
+              Model selection and threshold controls are intentionally
+              read-only here: the current frontend has no API for changing the
+              Flask router’s runtime configuration.
+            </p>
           </section>
           <aside>
             <RoutingDiagram />
@@ -1100,61 +1224,14 @@ function Routing() {
   );
 }
 
-const historyItems = [
-  {
-    id: 1,
-    query: "Explain binary search in Java",
-    model: "Llama 3.2 3B",
-    confidence: 92,
-    time: "0.9s",
-    status: "Completed",
-    at: "Today, 10:42 AM",
-  },
-  {
-    id: 2,
-    query: "What is photosynthesis?",
-    model: "Llama 3.2 3B",
-    confidence: 88,
-    time: "0.7s",
-    status: "Completed",
-    at: "Today, 10:36 AM",
-  },
-  {
-    id: 3,
-    query: "Compare REST and GraphQL APIs",
-    model: "Mistral 7B",
-    confidence: 64,
-    time: "2.4s",
-    status: "Escalated",
-    at: "Today, 10:18 AM",
-  },
-  {
-    id: 4,
-    query: "Convert 5 km to meters",
-    model: "Phi-3 Mini",
-    confidence: 98,
-    time: "0.4s",
-    status: "Completed",
-    at: "Yesterday, 4:12 PM",
-  },
-  {
-    id: 5,
-    query: "Write a haiku about the Pacific Northwest",
-    model: "Llama 3.2 3B",
-    confidence: 84,
-    time: "0.8s",
-    status: "Completed",
-    at: "Yesterday, 3:54 PM",
-  },
-];
-
-function History() {
+function History({ activity }) {
   const [search, setSearch] = useState("");
   const [modelFilter, setModelFilter] = useState("All models");
   const [confidenceFilter, setConfidenceFilter] = useState("All confidence");
-  const [selected, setSelected] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
+  const selected = activity.find((item) => item.id === selectedId);
 
-  const filteredItems = historyItems.filter((item) => {
+  const filteredItems = activity.filter((item) => {
     const matchesSearch = item.query
       .toLowerCase()
       .includes(search.toLowerCase());
@@ -1163,22 +1240,18 @@ function History() {
     const matchesConfidence =
       confidenceFilter === "All confidence" ||
       (confidenceFilter === "High"
-        ? item.confidence >= 80
-        : item.confidence < 80);
+        ? item.confidence >= 0.8
+        : item.confidence < 0.8);
     return matchesSearch && matchesModel && matchesConfidence;
   });
 
   return (
-    <main className="relative overflow-hidden px-5 pb-16 pt-10 sm:px-10 md:px-14 md:pt-16">
-      <div className="hero-grid pointer-events-none absolute inset-0 h-[38rem] opacity-50" />
-      <div className="orb pointer-events-none" />
-      <div className="relative mx-auto max-w-6xl">
-        <PageHeader
-          eyebrow="Request log / local mock data"
-          title="QUERY HISTORY"
-        >
-          <p className="mt-5 max-w-lg text-sm leading-7 text-slate-400 sm:text-base">
-            Review recent requests and how Cascadia routed each one.
+    <main className="page-wrap">
+      <div className="page-content max-w-6xl">
+        <PageHeader eyebrow="LOCAL SESSION / COMPLETED REQUESTS" title="Query history">
+          <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">
+            Requests and routing decisions captured in this browser session.
+            History is not persisted after a reload.
           </p>
         </PageHeader>
         <div className="glass rounded-2xl p-4 sm:p-5">
@@ -1203,9 +1276,9 @@ function History() {
               className="rounded-lg border border-white/10 bg-[#0a1725] px-3 py-2.5 text-xs text-slate-300 outline-none"
             >
               <option>All models</option>
-              <option>Llama 3.2 3B</option>
-              <option>Phi-3 Mini</option>
-              <option>Mistral 7B</option>
+              {configuredModels.map((model) => (
+                <option key={model.name}>{model.name}</option>
+              ))}
             </select>
             <select
               value={confidenceFilter}
@@ -1243,8 +1316,15 @@ function History() {
                 {filteredItems.map((item) => (
                   <tr
                     key={item.id}
-                    onClick={() => setSelected(item)}
-                    className={`cursor-pointer border-b border-white/[.06] text-xs transition hover:bg-white/[.035] ${selected?.id === item.id ? "bg-sky-300/[.05]" : ""}`}
+                    onClick={() => setSelectedId(item.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedId(item.id);
+                      }
+                    }}
+                    tabIndex={0}
+                    className={`cursor-pointer border-b border-white/[.06] text-xs transition hover:bg-white/[.035] ${selectedId === item.id ? "bg-sky-300/[.05]" : ""}`}
                   >
                     <td className="max-w-[19rem] truncate px-3 py-4 pl-2 text-slate-200">
                       {item.query}
@@ -1253,26 +1333,33 @@ function History() {
                       {item.model}
                     </td>
                     <td className="px-3 py-4 text-sky-300">
-                      {item.confidence}%
+                      {(item.confidence * 100).toFixed(0)}%
                     </td>
-                    <td className="px-3 py-4 text-slate-400">{item.time}</td>
+                    <td className="px-3 py-4 text-slate-400">
+                      {formatDuration(item.timing.total_ms)}
+                    </td>
                     <td className="px-3 py-4">
                       <span
-                        className={`rounded-full border px-2 py-1 font-mono text-[9px] ${item.status === "Escalated" ? "border-amber-300/20 text-amber-200/80" : "border-emerald-300/20 text-emerald-300"}`}
+                        className={`rounded-full border px-2 py-1 font-mono text-[9px] ${item.escalated ? "border-amber-300/20 text-amber-200/80" : "border-emerald-300/20 text-emerald-300"}`}
                       >
-                        {item.status}
+                        {item.escalated ? "Escalated" : "Direct"}
                       </span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-4 text-slate-500">
-                      {item.at}
+                      {new Intl.DateTimeFormat(undefined, {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      }).format(new Date(item.completedAt))}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {filteredItems.length === 0 && (
-              <div className="py-12 text-center text-xs text-slate-600">
-                No matching queries found.
+              <div className="py-12 text-center text-xs text-slate-500">
+                {activity.length
+                  ? "No requests match these filters."
+                  : "Completed requests from this session will appear here."}
               </div>
             )}
           </div>
@@ -1290,7 +1377,7 @@ function History() {
               </div>
               <button
                 type="button"
-                onClick={() => setSelected(null)}
+                onClick={() => setSelectedId(null)}
                 className="text-xs text-slate-600 transition hover:text-slate-300"
               >
                 Close
@@ -1308,21 +1395,23 @@ function History() {
                   Confidence
                 </p>
                 <p className="mt-2 text-xs text-sky-300">
-                  {selected.confidence}%
+                  {(selected.confidence * 100).toFixed(0)}%
                 </p>
               </div>
               <div>
                 <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
                   Response time
                 </p>
-                <p className="mt-2 text-xs text-slate-300">{selected.time}</p>
+                <p className="mt-2 text-xs text-slate-300">
+                  {formatDuration(selected.timing.total_ms)}
+                </p>
               </div>
               <div>
                 <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
                   Status
                 </p>
                 <p className="mt-2 text-xs text-emerald-300">
-                  {selected.status}
+                  {selected.escalated ? "Escalated" : "Direct"}
                 </p>
               </div>
             </div>
@@ -1333,124 +1422,204 @@ function History() {
   );
 }
 
-const usageBars = [
-  { label: "Small Model", value: 78, color: "bg-sky-300" },
-  { label: "Large Model", value: 22, color: "bg-violet-300" },
-];
-const confidenceBars = [
-  { label: "90 - 100%", value: 42 },
-  { label: "80 - 89%", value: 31 },
-  { label: "70 - 79%", value: 18 },
-  { label: "Below 70%", value: 9 },
-];
-const responseBars = [52, 68, 45, 72, 58, 82, 64, 48, 76, 60, 88, 70];
-
-function AnalyticsCard({ title, children, className = "" }) {
+function AnalyticsCard({ title, meta, children, className = "" }) {
   return (
-    <section className={`glass rounded-2xl p-5 sm:p-6 ${className}`}>
-      <div className="mb-7 flex items-center justify-between">
+    <section className={`glass analytics-card rounded-2xl p-5 sm:p-6 ${className}`}>
+      <div className="section-heading mb-6">
         <h2 className="font-display text-sm text-slate-100">{title}</h2>
-        <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-          Mock data
-        </span>
+        {meta && (
+          <span className="font-mono text-[9px] uppercase tracking-wider text-slate-500">
+            {meta}
+          </span>
+        )}
       </div>
       {children}
     </section>
   );
 }
 
-function Analytics() {
-  const metrics = [
-    ["Total Queries", "1,248"],
-    ["Small Model Usage", "78%"],
-    ["Large Model Usage", "22%"],
-    ["Average Confidence", "84%"],
-    ["Average Response Time", "1.2s"],
-    ["Escalation Rate", "22%"],
+function Analytics({ activity }) {
+  const sessionTotal = activity.length;
+  const sessionEscalated = activity.filter((item) => item.escalated).length;
+  const sessionAverageConfidence = sessionTotal
+    ? activity.reduce((total, item) => total + item.confidence, 0) / sessionTotal
+    : null;
+  const sessionAverageDuration = sessionTotal
+    ? activity.reduce((total, item) => total + item.timing.total_ms, 0) /
+      sessionTotal
+    : null;
+  const benchmarkSamples = benchmarkRun.results.filter(
+    (item) => item.status === "success",
+  );
+  const benchmarkConfidence = benchmarkSamples.filter(
+    (item) => typeof item.confidence === "number",
+  );
+  const confidenceBands = [
+    { label: "90–100%", min: 90, max: 101 },
+    { label: "80–89%", min: 80, max: 90 },
+    { label: "70–79%", min: 70, max: 80 },
+    { label: "Below 70%", min: 0, max: 70 },
+  ].map((band) => ({
+    ...band,
+    count: benchmarkConfidence.filter((item) => {
+      const confidence = item.confidence * 100;
+      return confidence >= band.min && confidence < band.max;
+    }).length,
+  }));
+  const benchmarkModelCounts = [
+    { label: SMALL_MODEL, count: benchmarkRun.summary["3b_count"] },
+    { label: LARGE_MODEL, count: benchmarkRun.summary["7b_count"] },
   ];
+  const responseSamples = benchmarkSamples.slice(-12).reverse();
+  const maxResponseTime = Math.max(
+    ...responseSamples.map((sample) => sample.response_time_seconds),
+    1,
+  );
+
   return (
-    <main className="relative overflow-hidden px-5 pb-16 pt-10 sm:px-10 md:px-14 md:pt-16">
-      <div className="hero-grid pointer-events-none absolute inset-0 h-[38rem] opacity-50" />
-      <div className="orb pointer-events-none" />
-      <div className="relative mx-auto max-w-6xl">
-        <PageHeader
-          eyebrow="System pulse / local mock data"
-          title="PERFORMANCE"
-        >
-          <p className="mt-5 max-w-lg text-sm leading-7 text-slate-400 sm:text-base">
-            A quiet view of how Cascadia is routing requests across the model
-            cascade.
+    <main className="page-wrap">
+      <div className="page-content max-w-6xl">
+        <PageHeader eyebrow="MEASURED OUTPUT / SESSION + ARCHIVE" title="Analytics">
+          <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">
+            Live figures are collected from completed requests in this browser
+            session. Archived charts use the latest recorded benchmark run.
           </p>
         </PageHeader>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {metrics.map(([label, value]) => (
-            <div key={label} className="glass rounded-xl p-4">
-              <p className="font-mono text-[9px] uppercase leading-4 tracking-wider text-slate-600">
-                {label}
-              </p>
-              <p className="mt-3 font-display text-xl text-slate-100">
-                {value}
-              </p>
+
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="eyebrow-label">Current session</p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {sessionTotal} completed request{sessionTotal === 1 ? "" : "s"} · resets when this page reloads
+            </p>
+          </div>
+          <span className="role-chip">Live data</span>
+        </div>
+
+        <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {[
+            ["Requests", sessionTotal],
+            [
+              "3B selected",
+              activity.filter((item) => item.model === SMALL_MODEL).length,
+            ],
+            [
+              "7B selected",
+              activity.filter((item) => item.model === LARGE_MODEL).length,
+            ],
+            [
+              "Avg. confidence",
+              sessionAverageConfidence === null
+                ? "—"
+                : `${(sessionAverageConfidence * 100).toFixed(0)}%`,
+            ],
+            ["Avg. response", formatDuration(sessionAverageDuration)],
+            [
+              "Escalation rate",
+              sessionTotal
+                ? `${((sessionEscalated / sessionTotal) * 100).toFixed(0)}%`
+                : "—",
+            ],
+          ].map(([label, value]) => (
+            <div key={label} className="glass metric-panel rounded-xl p-4">
+              <p className="eyebrow-label">{label}</p>
+              <p className="mt-3 font-display text-xl text-slate-100">{value}</p>
             </div>
           ))}
+        </section>
+
+        <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="eyebrow-label">Recorded benchmark snapshot</p>
+            <h2 className="mt-2 font-display text-lg text-slate-100">
+              {formatBenchmarkDate(benchmarkRun.timestamp)}
+            </h2>
+          </div>
+          <p className="text-[11px] text-slate-500">
+            {benchmarkRun.summary.successful_queries} successful · {benchmarkRun.summary.failed_queries} failed
+          </p>
         </div>
-        <div className="mt-8 grid gap-5 lg:grid-cols-2">
-          <AnalyticsCard title="Small vs Large Model Usage">
-            <div className="space-y-6">
-              {usageBars.map((bar) => (
-                <div key={bar.label}>
-                  <div className="mb-2 flex justify-between text-xs">
-                    <span className="text-slate-400">{bar.label}</span>
-                    <span className="text-slate-200">{bar.value}%</span>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <AnalyticsCard title="Model selection" meta={`${benchmarkRun.total_queries} benchmark queries`}>
+            <div className="space-y-5">
+              {benchmarkModelCounts.map((model) => {
+                const percentage = benchmarkRun.total_queries
+                  ? (model.count / benchmarkRun.total_queries) * 100
+                  : 0;
+                return (
+                  <div key={model.label}>
+                    <div className="mb-2 flex justify-between gap-3 text-xs">
+                      <span className="text-slate-400">{model.label}</span>
+                      <span className="font-mono text-slate-300">
+                        {model.count} <span className="text-slate-600">/</span> {percentage.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="metric-track">
+                      <div className="metric-fill" style={{ width: `${percentage}%` }} />
+                    </div>
                   </div>
-                  <div className="h-2 rounded-full bg-white/[.07]">
-                    <div
-                      className={`h-2 rounded-full ${bar.color}`}
-                      style={{ width: `${bar.value}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </AnalyticsCard>
-          <AnalyticsCard title="Confidence Distribution">
-            <div className="space-y-3">
-              {confidenceBars.map((bar) => (
-                <div key={bar.label} className="flex items-center gap-3">
-                  <span className="w-16 shrink-0 font-mono text-[9px] text-slate-600">
-                    {bar.label}
-                  </span>
-                  <div className="h-6 flex-1 rounded bg-white/[.04]">
-                    <div
-                      className="h-6 rounded bg-gradient-to-r from-sky-300/70 to-sky-300/20"
-                      style={{ width: `${bar.value * 2}%` }}
-                    />
-                  </div>
-                  <span className="w-7 text-right text-[10px] text-slate-400">
-                    {bar.value}%
-                  </span>
-                </div>
-              ))}
-            </div>
+
+          <AnalyticsCard title="Confidence distribution" meta={`${benchmarkConfidence.length} measured responses`}>
+            {benchmarkConfidence.length ? (
+              <div className="space-y-4">
+                {confidenceBands.map((band) => {
+                  const percentage = (band.count / benchmarkConfidence.length) * 100;
+                  return (
+                    <div key={band.label} className="flex items-center gap-3">
+                      <span className="w-20 shrink-0 font-mono text-[9px] text-slate-500">
+                        {band.label}
+                      </span>
+                      <div className="metric-track flex-1">
+                        <div className="metric-fill" style={{ width: `${percentage}%` }} />
+                      </div>
+                      <span className="w-14 text-right font-mono text-[10px] text-slate-400">
+                        {band.count} <span className="text-slate-600">/</span> {percentage.toFixed(0)}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="py-8 text-center text-xs text-slate-500">
+                Confidence values are not present in the recorded benchmark.
+              </p>
+            )}
           </AnalyticsCard>
-          <AnalyticsCard title="Response Time" className="lg:col-span-2">
-            <div className="flex h-36 items-end gap-2 border-b border-l border-white/[.1] px-3 pb-0 pt-4">
-              {responseBars.map((value, index) => (
-                <div key={index} className="group relative flex-1">
-                  <div
-                    className="w-full rounded-t bg-gradient-to-t from-violet-300/60 to-sky-300/80 transition group-hover:from-violet-200 group-hover:to-sky-200"
-                    style={{ height: `${value}%` }}
-                  />
-                  <span className="absolute -top-5 left-1/2 hidden -translate-x-1/2 font-mono text-[8px] text-slate-500 group-hover:block">
-                    {(value / 55).toFixed(1)}s
-                  </span>
+
+          <AnalyticsCard
+            title="Response time samples"
+            meta={`${responseSamples.length} of ${benchmarkSamples.length} successful queries`}
+            className="lg:col-span-2"
+          >
+            {responseSamples.length ? (
+              <>
+                <div className="benchmark-chart" role="img" aria-label="Recorded response times for benchmark queries">
+                  {responseSamples.map((sample, index) => (
+                    <div
+                      key={`${sample.category}-${sample.id}-${index}`}
+                      className="benchmark-bar"
+                      style={{
+                        height: `${Math.max(4, (sample.response_time_seconds / maxResponseTime) * 100)}%`,
+                      }}
+                      title={`${sample.category}: ${sample.response_time_seconds}s`}
+                    />
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div className="mt-3 flex justify-between font-mono text-[9px] text-slate-600">
-              <span>Earlier</span>
-              <span>Recent queries</span>
-            </div>
+                <div className="mt-3 flex justify-between font-mono text-[9px] text-slate-500">
+                  <span>Recorded sample</span>
+                  <span>Response time · seconds</span>
+                </div>
+              </>
+            ) : (
+              <p className="py-8 text-center text-xs text-slate-500">
+                No successful response-time samples in the recorded benchmark.
+              </p>
+            )}
           </AnalyticsCard>
         </div>
       </div>
@@ -1458,37 +1627,11 @@ function Analytics() {
   );
 }
 
-function SettingsToggle({ label, description, checked, onChange }) {
-  return (
-    <label className="flex cursor-pointer items-center justify-between gap-5">
-      <span>
-        <span className="block text-xs text-slate-300">{label}</span>
-        <span className="mt-1 block text-[11px] leading-5 text-slate-600">
-          {description}
-        </span>
-      </span>
-      <span
-        className={`relative h-5 w-9 shrink-0 rounded-full border transition ${checked ? "border-sky-300/50 bg-sky-300/30" : "border-white/15 bg-white/[.04]"}`}
-      >
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onChange}
-          className="sr-only"
-        />
-        <span
-          className={`absolute top-0.5 h-3.5 w-3.5 rounded-full transition ${checked ? "left-[17px] bg-sky-100" : "left-0.5 bg-slate-500"}`}
-        />
-      </span>
-    </label>
-  );
-}
-
 function SettingsCard({ title, children }) {
   return (
     <section className="glass rounded-2xl p-5 sm:p-7">
       <div className="mb-6 flex items-center gap-3">
-        <span className="h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_10px_#7dd3fc]" />
+        <span className="h-1.5 w-1.5 rounded-full bg-[#d69a55] shadow-[0_0_10px_rgba(214,154,85,.5)]" />
         <h2 className="font-display text-base text-slate-100">{title}</h2>
       </div>
       {children}
@@ -1497,158 +1640,77 @@ function SettingsCard({ title, children }) {
 }
 
 function Settings() {
-  const [timeout, setTimeoutValue] = useState(30);
-  const [tokens, setTokens] = useState("1024");
-  const [threshold, setThreshold] = useState(70);
-  const [automaticEscalation, setAutomaticEscalation] = useState(true);
-  const [animations, setAnimations] = useState(true);
-  const [compactMode, setCompactMode] = useState(false);
-  const [theme, setTheme] = useState("Cascadia dark");
-  const [fallback, setFallback] = useState("Keep on small model");
-
   return (
-    <main className="relative overflow-hidden px-5 pb-16 pt-10 sm:px-10 md:px-14 md:pt-16">
-      <div className="hero-grid pointer-events-none absolute inset-0 h-[38rem] opacity-50" />
-      <div className="orb pointer-events-none" />
-      <div className="relative mx-auto max-w-4xl">
-        <PageHeader eyebrow="Workspace / local preferences" title="SETTINGS">
-          <p className="mt-5 max-w-lg text-sm leading-7 text-slate-400 sm:text-base">
-            Tune how this local Cascadia workspace behaves. Changes are saved
-            for this session only.
+    <main className="page-wrap">
+      <div className="page-content max-w-4xl">
+        <PageHeader eyebrow="Workspace / local configuration" title="Settings">
+          <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">
+            A read-only view of the runtime and routing configuration exposed by
+            the current local API.
           </p>
         </PageHeader>
-        <div className="space-y-5">
+        <div className="grid gap-5 md:grid-cols-2">
           <SettingsCard title="Inference">
-            <div className="mb-6 flex items-center justify-between rounded-xl border border-emerald-300/15 bg-emerald-300/[.04] p-4">
-              <div>
-                <p className="text-xs text-slate-300">Local inference status</p>
-                <p className="mt-1 text-[11px] text-slate-600">
-                  Ready for configured demo models
-                </p>
+            <dl className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Runtime health</dt>
+                <dd className="max-w-48 text-right text-xs leading-5 text-slate-300">
+                  No standalone health endpoint
+                </dd>
               </div>
-              <span className="flex items-center gap-2 font-mono text-[9px] uppercase tracking-wider text-emerald-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                Available
-              </span>
-            </div>
-            <div className="grid gap-6 sm:grid-cols-2">
-              <label className="block">
-                <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                  Response timeout
-                </span>
-                <div className="mt-3 flex items-center gap-3">
-                  <input
-                    aria-label="Response timeout"
-                    type="range"
-                    min="5"
-                    max="120"
-                    value={timeout}
-                    onChange={(event) =>
-                      setTimeoutValue(Number(event.target.value))
-                    }
-                    className="flex-1 accent-sky-300"
-                  />
-                  <span className="w-12 text-right text-xs text-slate-300">
-                    {timeout}s
-                  </span>
-                </div>
-              </label>
-              <label className="block">
-                <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                  Maximum tokens
-                </span>
-                <select
-                  value={tokens}
-                  onChange={(event) => setTokens(event.target.value)}
-                  className="mt-3 w-full rounded-lg border border-white/10 bg-[#0a1725] px-3 py-2.5 text-xs text-slate-300 outline-none"
-                >
-                  <option value="512">512 tokens</option>
-                  <option value="1024">1,024 tokens</option>
-                  <option value="2048">2,048 tokens</option>
-                  <option value="4096">4,096 tokens</option>
-                </select>
-              </label>
-            </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Configured models</dt>
+                <dd className="text-right font-mono text-xs text-slate-200">
+                  qwen2.5:3b · qwen2.5:7b
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Timeout / token limits</dt>
+                <dd className="max-w-48 text-right text-xs leading-5 text-slate-300">
+                  Controlled by the backend
+                </dd>
+              </div>
+            </dl>
           </SettingsCard>
-          <SettingsCard title="Routing">
-            <label className="block">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                  Confidence threshold
-                </span>
-                <span className="text-xs text-sky-300">{threshold}%</span>
+          <SettingsCard title="Confidence routing">
+            <dl className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Default threshold</dt>
+                <dd className="font-mono text-xs text-[#e8cba7]">70%</dd>
               </div>
-              <input
-                aria-label="Settings confidence threshold"
-                type="range"
-                min="0"
-                max="100"
-                value={threshold}
-                onChange={(event) => setThreshold(Number(event.target.value))}
-                className="mt-4 w-full accent-sky-300"
-              />
-              <div className="mt-2 flex justify-between font-mono text-[9px] text-slate-600">
-                <span>0%</span>
-                <span>100%</span>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">First pass</dt>
+                <dd className="font-mono text-xs text-slate-200">qwen2.5:3b</dd>
               </div>
-            </label>
-            <div className="mt-7 border-t border-white/[.08] pt-6">
-              <SettingsToggle
-                label="Automatic escalation"
-                description="Move low-confidence requests to a larger model."
-                checked={automaticEscalation}
-                onChange={(event) =>
-                  setAutomaticEscalation(event.target.checked)
-                }
-              />
-            </div>
-            <label className="mt-7 block">
-              <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
-                Fallback behavior
-              </span>
-              <select
-                value={fallback}
-                onChange={(event) => setFallback(event.target.value)}
-                className="mt-3 w-full rounded-lg border border-white/10 bg-[#0a1725] px-3 py-2.5 text-xs text-slate-300 outline-none"
-              >
-                <option>Keep on small model</option>
-                <option>Escalate to large model</option>
-                <option>Return a routing error</option>
-              </select>
-            </label>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Escalation</dt>
+                <dd className="font-mono text-xs text-slate-200">qwen2.5:7b</dd>
+              </div>
+            </dl>
+            <p className="mt-5 border-t border-white/[.08] pt-4 text-xs leading-6 text-slate-400">
+              Routing settings are managed by Flask. The current API does not
+              expose frontend controls for changing them.
+            </p>
           </SettingsCard>
           <SettingsCard title="Interface">
-            <div className="space-y-6">
-              <SettingsToggle
-                label="Animations"
-                description="Use subtle page entrance and interaction transitions."
-                checked={animations}
-                onChange={(event) => setAnimations(event.target.checked)}
-              />
-              <SettingsToggle
-                label="Compact mode"
-                description="Use tighter spacing across workspace surfaces."
-                checked={compactMode}
-                onChange={(event) => setCompactMode(event.target.checked)}
-              />
-              <label className="flex items-center justify-between gap-5">
-                <span>
-                  <span className="block text-xs text-slate-300">Theme</span>
-                  <span className="mt-1 block text-[11px] text-slate-600">
-                    Choose the workspace color treatment.
-                  </span>
-                </span>
-                <select
-                  value={theme}
-                  onChange={(event) => setTheme(event.target.value)}
-                  className="rounded-lg border border-white/10 bg-[#0a1725] px-3 py-2.5 text-xs text-slate-300 outline-none"
-                >
-                  <option>Cascadia dark</option>
-                  <option>Midnight blue</option>
-                  <option>Low contrast</option>
-                </select>
-              </label>
-            </div>
+            <dl className="space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Theme</dt>
+                <dd className="text-xs text-slate-200">Cascadia black &amp; amber</dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Motion</dt>
+                <dd className="max-w-48 text-right text-xs leading-5 text-slate-300">
+                  Respects reduced-motion preference
+                </dd>
+              </div>
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-xs text-slate-400">Request history</dt>
+                <dd className="text-right text-xs text-slate-300">
+                  Current browser session
+                </dd>
+              </div>
+            </dl>
           </SettingsCard>
         </div>
       </div>
@@ -1779,18 +1841,37 @@ function Placeholder() {
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activity, setActivity] = useState([]);
+  const recordRequest = (request) => {
+    setActivity((current) => [request, ...current].slice(0, 20));
+  };
+  const updateAmbientPosition = (event) => {
+    if (event.pointerType !== "mouse") return;
+    event.currentTarget.style.setProperty(
+      "--pointer-x",
+      `${event.clientX}px`,
+    );
+    event.currentTarget.style.setProperty(
+      "--pointer-y",
+      `${event.clientY}px`,
+    );
+  };
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" onPointerMove={updateAmbientPosition}>
       <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
       <div className="md:pl-64">
         <Header onMenu={() => setMenuOpen(true)} />
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/playground" element={<Playground />} />
-          <Route path="/models" element={<Models />} />
+          <Route path="/" element={<Home activity={activity} />} />
+          <Route
+            path="/playground"
+            element={<Playground onRequestComplete={recordRequest} />}
+          />
+          <Route path="/models" element={<Models activity={activity} />} />
           <Route path="/routing" element={<Routing />} />
-          <Route path="/history" element={<History />} />
-          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/history" element={<History activity={activity} />} />
+          <Route path="/analytics" element={<Analytics activity={activity} />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/about" element={<About />} />
           <Route path="*" element={<Placeholder />} />
