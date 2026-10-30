@@ -97,9 +97,25 @@ def _duration_ms(value: object) -> float | None:
     return None
 
 
+def _token_count(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
+
+
+def _response_metrics(payload: dict[str, object]) -> dict[str, int | float | None]:
+    return {
+        "ollama_total_ms": _duration_ms(payload.get("total_duration")),
+        "model_loading_ms": _duration_ms(payload.get("load_duration")),
+        "prompt_processing_ms": _duration_ms(payload.get("prompt_eval_duration")),
+        "token_generation_ms": _duration_ms(payload.get("eval_duration")),
+        "generated_tokens": _token_count(payload.get("eval_count")),
+    }
+
+
 def generate_response_with_metrics(
     model: str, prompt: str
-) -> tuple[str, dict[str, float | None]]:
+) -> tuple[str, dict[str, int | float | None]]:
     options = _generation_options(prompt)
     try:
         response = requests.post(
@@ -126,13 +142,7 @@ def generate_response_with_metrics(
     if not isinstance(response_text, str):
         raise OllamaInvalidResponse
 
-    metrics = {
-        "ollama_total_ms": _duration_ms(payload.get("total_duration")),
-        "model_loading_ms": _duration_ms(payload.get("load_duration")),
-        "prompt_processing_ms": _duration_ms(payload.get("prompt_eval_duration")),
-        "token_generation_ms": _duration_ms(payload.get("eval_duration")),
-    }
-    return response_text, metrics
+    return response_text, _response_metrics(payload)
 
 
 def generate_response(model: str, prompt: str) -> str:
@@ -210,18 +220,7 @@ def stream_response(model: str, prompt: str) -> Iterator[dict[str, object]]:
                 completed = True
                 if not text_received:
                     raise OllamaInvalidResponse
-                yield {
-                    "metrics": {
-                        "ollama_total_ms": _duration_ms(payload.get("total_duration")),
-                        "model_loading_ms": _duration_ms(payload.get("load_duration")),
-                        "prompt_processing_ms": _duration_ms(
-                            payload.get("prompt_eval_duration")
-                        ),
-                        "token_generation_ms": _duration_ms(
-                            payload.get("eval_duration")
-                        ),
-                    }
-                }
+                yield {"metrics": _response_metrics(payload)}
                 break
 
         if not completed:
@@ -235,7 +234,7 @@ def stream_response(model: str, prompt: str) -> Iterator[dict[str, object]]:
 def stream_cascaded_response(
     query: str, started: float
 ) -> Iterator[dict[str, object]]:
-    generation_metrics: list[dict[str, float | None]] = []
+    generation_metrics: list[dict[str, int | float | None]] = []
     small_response_parts = []
     preflight_stream = stream_response(SMALL_MODEL, query)
     try:
@@ -262,22 +261,38 @@ def stream_cascaded_response(
     }
 
     answer_stream = stream_response(model, query)
+    answer_metrics = None
+    time_to_first_token_ms = None
     try:
         for part in answer_stream:
             if "token" in part:
+                if time_to_first_token_ms is None:
+                    time_to_first_token_ms = round(
+                        (time.perf_counter() - started) * 1000, 2
+                    )
                 yield part
             elif "metrics" in part:
-                generation_metrics.append(part["metrics"])
+                answer_metrics = part["metrics"]
+                generation_metrics.append(answer_metrics)
     finally:
         close_stream = getattr(answer_stream, "close", None)
         if callable(close_stream):
             close_stream()
 
-    yield {"complete": {"timing": build_timing(started, generation_metrics)}}
+    yield {
+        "complete": {
+            "timing": build_timing(
+                started,
+                generation_metrics,
+                answer_metrics=answer_metrics,
+                time_to_first_token_ms=time_to_first_token_ms,
+            )
+        }
+    }
 
 
 def _sum_metric(
-    metrics: list[dict[str, float | None]], name: str
+    metrics: list[dict[str, int | float | None]], name: str
 ) -> float | None:
     values = [item[name] for item in metrics]
     if any(value is None for value in values):
@@ -286,10 +301,28 @@ def _sum_metric(
 
 
 def build_timing(
-    started: float, generation_metrics: list[dict[str, float | None]]
-) -> dict[str, float | None]:
+    started: float,
+    generation_metrics: list[dict[str, int | float | None]],
+    *,
+    answer_metrics: dict[str, int | float | None] | None = None,
+    time_to_first_token_ms: float | None = None,
+) -> dict[str, int | float | None]:
     ollama_total_ms = _sum_metric(generation_metrics, "ollama_total_ms")
-    timing: dict[str, float | None] = {
+    generated_tokens = (
+        answer_metrics.get("generated_tokens") if answer_metrics else None
+    )
+    generation_ms = (
+        answer_metrics.get("token_generation_ms") if answer_metrics else None
+    )
+    tokens_per_second = None
+    if (
+        isinstance(generated_tokens, int)
+        and isinstance(generation_ms, (int, float))
+        and generation_ms > 0
+    ):
+        tokens_per_second = round(generated_tokens * 1000 / generation_ms, 2)
+
+    timing: dict[str, int | float | None] = {
         "total_ms": round((time.perf_counter() - started) * 1000, 2),
         "ollama_total_ms": ollama_total_ms,
         "model_loading_ms": _sum_metric(generation_metrics, "model_loading_ms"),
@@ -299,6 +332,9 @@ def build_timing(
         "token_generation_ms": _sum_metric(
             generation_metrics, "token_generation_ms"
         ),
+        "generated_tokens": generated_tokens,
+        "tokens_per_second": tokens_per_second,
+        "time_to_first_token_ms": time_to_first_token_ms,
     }
     if ollama_total_ms is not None:
         timing["other_ms"] = round(
@@ -320,6 +356,7 @@ def route_query(query: str) -> dict[str, object]:
     if confidence < CONFIDENCE_THRESHOLD:
         response, large_metrics = generate_response_with_metrics(LARGE_MODEL, query)
         generation_metrics.append(large_metrics)
+        answer_metrics = large_metrics
         result = {
             "response": response,
             "model": LARGE_MODEL,
@@ -327,6 +364,7 @@ def route_query(query: str) -> dict[str, object]:
             "escalated": True,
         }
     else:
+        answer_metrics = small_metrics
         result = {
             "response": small_response,
             "model": SMALL_MODEL,
@@ -334,5 +372,7 @@ def route_query(query: str) -> dict[str, object]:
             "escalated": False,
         }
 
-    result["timing"] = build_timing(started, generation_metrics)
+    result["timing"] = build_timing(
+        started, generation_metrics, answer_metrics=answer_metrics
+    )
     return result

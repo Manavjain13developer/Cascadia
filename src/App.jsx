@@ -657,6 +657,38 @@ function Playground() {
                       </p>
                     </div>
                   </div>
+                  <div className="mt-5 grid grid-cols-2 gap-4 border-t border-white/[.08] pt-4 sm:grid-cols-3">
+                    <div>
+                      <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
+                        Generated tokens
+                      </p>
+                      <p className="mt-2 text-sm text-slate-100">
+                        {result.timing?.generated_tokens ?? "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
+                        Generation speed
+                      </p>
+                      <p className="mt-2 text-sm text-slate-100">
+                        {result.timing?.tokens_per_second == null
+                          ? "—"
+                          : `${result.timing.tokens_per_second.toFixed(2)} tokens/s`}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
+                        Time to first token
+                      </p>
+                      <p className="mt-2 text-sm text-slate-100">
+                        {result.timing?.time_to_first_token_ms == null
+                          ? "—"
+                          : result.timing.time_to_first_token_ms >= 1000
+                            ? `${(result.timing.time_to_first_token_ms / 1000).toFixed(2)} s`
+                            : `${result.timing.time_to_first_token_ms.toFixed(0)} ms`}
+                      </p>
+                    </div>
+                  </div>
                   <div className="mt-6 border-t border-white/[.08] pt-4">
                     <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
                       Routing status

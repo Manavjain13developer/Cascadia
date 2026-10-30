@@ -129,6 +129,17 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
             )
             for metric in timing_metrics
         },
+        "average_generation_metrics": {
+            metric: _average(
+                [
+                    result["timing"][metric]
+                    for result in successful
+                    if isinstance(result.get("timing"), dict)
+                    and isinstance(result["timing"].get(metric), (int, float))
+                ]
+            )
+            for metric in ("generated_tokens", "tokens_per_second")
+        },
         "category_average_response_time": {
             category: _average(
                 [
@@ -187,6 +198,15 @@ def print_summary(results: list[dict[str, Any]], summary: dict[str, Any]) -> Non
     print("\nAverage timing breakdown:")
     for metric, average in summary["average_timing_seconds"].items():
         print(f"  {metric.replace('_', ' ').title()}: {average:.3f} sec")
+    print("\nAverage generation metrics:")
+    print(
+        f"  Generated Tokens: "
+        f"{summary['average_generation_metrics']['generated_tokens']:.2f}"
+    )
+    print(
+        f"  Tokens Per Second: "
+        f"{summary['average_generation_metrics']['tokens_per_second']:.2f}"
+    )
     for category in ("simple", "medium", "complex"):
         print(f"{category.title()} Average: {category_averages[category]:.3f} sec")
     print("\nMODEL USAGE BY CATEGORY")

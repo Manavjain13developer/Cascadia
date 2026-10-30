@@ -6,9 +6,13 @@ Make sure Ollama has both `qwen2.5:3b` and `qwen2.5:7b` available. Cascadia
 starts each query on the 3B model, escalating to 7B only when confidence is
 below the configured threshold. Models are kept loaded for 10 minutes after
 use, and the response details show total time plus Ollama's load, prompt, and
-generation timings. Generation limits scale with query complexity (256, 768,
-or 1,536 tokens), context grows only when needed, and Ollama's model-default
-temperature is retained.
+generation timings, generated output tokens, and tokens per second. Streamed
+requests also report time to first displayed token; this includes the 3B
+confidence preflight. Token count and generation speed come from Ollama's
+`eval_count` and `eval_duration`, not an estimate from response text.
+Generation limits scale with query complexity (256, 768, or 1,536 tokens),
+context grows only when needed, and Ollama's model-default temperature is
+retained.
 
 Backend:
 

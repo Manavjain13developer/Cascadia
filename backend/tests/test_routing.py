@@ -56,12 +56,14 @@ class RoutingApiTests(unittest.TestCase):
                 "model_loading_ms": 1.0,
                 "prompt_processing_ms": 2.0,
                 "token_generation_ms": 7.0,
+                "generated_tokens": 17,
             }),
             ("Detailed 7B response.", {
                 "ollama_total_ms": 20.0,
                 "model_loading_ms": 3.0,
                 "prompt_processing_ms": 5.0,
                 "token_generation_ms": 12.0,
+                "generated_tokens": 37,
             }),
         ],
     )
@@ -78,6 +80,8 @@ class RoutingApiTests(unittest.TestCase):
         self.assertEqual(result["timing"]["model_loading_ms"], 4.0)
         self.assertEqual(result["timing"]["prompt_processing_ms"], 7.0)
         self.assertEqual(result["timing"]["token_generation_ms"], 19.0)
+        self.assertEqual(result["timing"]["generated_tokens"], 37)
+        self.assertEqual(result["timing"]["tokens_per_second"], 3083.33)
         self.assertEqual(
             generate_response.call_args_list,
             [
@@ -123,6 +127,7 @@ class RoutingApiTests(unittest.TestCase):
             "load_duration": 100_000_000,
             "prompt_eval_duration": 200_000_000,
             "eval_duration": 700_000_000,
+            "eval_count": 21,
         }
         post.return_value = response
 
@@ -138,9 +143,32 @@ class RoutingApiTests(unittest.TestCase):
                 "model_loading_ms": 100.0,
                 "prompt_processing_ms": 200.0,
                 "token_generation_ms": 700.0,
+                "generated_tokens": 21,
             },
         )
         post.assert_called_once()
+
+    @patch("backend.core.router.requests.post")
+    def test_stream_response_reads_ollama_output_token_count(self, post):
+        response = Mock()
+        response.iter_lines.return_value = iter([
+            '{"response":"A concise answer."}',
+            json.dumps({
+                "done": True,
+                "total_duration": 1_000_000_000,
+                "load_duration": 100_000_000,
+                "prompt_eval_duration": 200_000_000,
+                "eval_duration": 700_000_000,
+                "eval_count": 21,
+            }),
+        ])
+        post.return_value = response
+
+        events = list(stream_response(SMALL_MODEL, "What is 2 + 2?"))
+
+        self.assertEqual(events[0], {"token": "A concise answer."})
+        self.assertEqual(events[1]["metrics"]["generated_tokens"], 21)
+        self.assertEqual(events[1]["metrics"]["token_generation_ms"], 700.0)
 
     @patch("backend.core.router.requests.post")
     def test_complex_prompt_gets_a_larger_generation_budget(self, post):
@@ -317,6 +345,7 @@ class RoutingApiTests(unittest.TestCase):
             "model_loading_ms": 1.0,
             "prompt_processing_ms": 2.0,
             "token_generation_ms": 7.0,
+            "generated_tokens": 21,
         }
         stream.side_effect = [
             iter([{"token": "A concise answer."}, {"metrics": metrics}]),
@@ -341,6 +370,12 @@ class RoutingApiTests(unittest.TestCase):
             [call.args[0] for call in stream.call_args_list],
             [SMALL_MODEL, SMALL_MODEL],
         )
+        timing = next(
+            event["complete"]["timing"] for event in events if "complete" in event
+        )
+        self.assertEqual(timing["generated_tokens"], 21)
+        self.assertEqual(timing["tokens_per_second"], 3000.0)
+        self.assertIsInstance(timing["time_to_first_token_ms"], float)
 
     @patch("backend.core.router.stream_response")
     def test_cascade_stream_escalates_to_large_model(self, stream):
@@ -349,6 +384,7 @@ class RoutingApiTests(unittest.TestCase):
             "model_loading_ms": 1.0,
             "prompt_processing_ms": 2.0,
             "token_generation_ms": 7.0,
+            "generated_tokens": 21,
         }
         stream.side_effect = [
             iter([{"token": "Initial analysis."}, {"metrics": metrics}]),
