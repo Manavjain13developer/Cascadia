@@ -1,7 +1,9 @@
+import json
 import math
 import os
 import re
 import time
+from collections.abc import Iterator
 
 import requests
 
@@ -50,6 +52,14 @@ class OllamaUnavailable(Exception):
 
 class OllamaInvalidResponse(Exception):
     """Ollama returned a body without a valid response string."""
+
+
+class OllamaModelNotFound(Exception):
+    """Ollama does not have the requested model installed."""
+
+
+class OllamaTimeout(Exception):
+    """Ollama did not complete a request before the configured timeout."""
 
 
 def _generation_options(prompt: str) -> dict[str, int]:
@@ -106,7 +116,7 @@ def generate_response_with_metrics(
         )
         response.raise_for_status()
     except requests.RequestException as error:
-        raise OllamaUnavailable from error
+        _raise_ollama_request_error(error)
 
     try:
         payload = response.json()
@@ -130,6 +140,142 @@ def generate_response(model: str, prompt: str) -> str:
     return response_text
 
 
+def _raise_ollama_request_error(error: requests.RequestException) -> None:
+    if isinstance(error, requests.Timeout):
+        raise OllamaTimeout from error
+    response = error.response
+    if response is not None and response.status_code == 404:
+        try:
+            payload = response.json()
+            detail = payload.get("error", "") if isinstance(payload, dict) else ""
+        except (AttributeError, ValueError):
+            detail = ""
+        if (
+            isinstance(detail, str)
+            and "model" in detail.lower()
+            and "not found" in detail.lower()
+        ):
+            raise OllamaModelNotFound from error
+    raise OllamaUnavailable from error
+
+
+def stream_response(model: str, prompt: str) -> Iterator[dict[str, object]]:
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": model,
+                "prompt": prompt,
+                "system": RESPONSE_SYSTEM_PROMPT,
+                "stream": True,
+                "keep_alive": MODEL_KEEP_ALIVE,
+                "options": _generation_options(prompt),
+            },
+            timeout=OLLAMA_TIMEOUT,
+            stream=True,
+        )
+        response.raise_for_status()
+    except requests.RequestException as error:
+        _raise_ollama_request_error(error)
+
+    text_received = False
+    completed = False
+    try:
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            if isinstance(line, bytes):
+                line = line.decode("utf-8")
+            try:
+                payload = json.loads(line)
+            except (TypeError, ValueError) as error:
+                raise OllamaInvalidResponse from error
+            if not isinstance(payload, dict):
+                raise OllamaInvalidResponse
+            if payload.get("error"):
+                message = str(payload["error"])
+                if "model" in message.lower() and "not found" in message.lower():
+                    raise OllamaModelNotFound(message)
+                raise OllamaUnavailable(message)
+
+            token = payload.get("response")
+            if token is not None:
+                if not isinstance(token, str):
+                    raise OllamaInvalidResponse
+                if token:
+                    text_received = True
+                    yield {"token": token}
+
+            if payload.get("done") is True:
+                completed = True
+                if not text_received:
+                    raise OllamaInvalidResponse
+                yield {
+                    "metrics": {
+                        "ollama_total_ms": _duration_ms(payload.get("total_duration")),
+                        "model_loading_ms": _duration_ms(payload.get("load_duration")),
+                        "prompt_processing_ms": _duration_ms(
+                            payload.get("prompt_eval_duration")
+                        ),
+                        "token_generation_ms": _duration_ms(
+                            payload.get("eval_duration")
+                        ),
+                    }
+                }
+                break
+
+        if not completed:
+            raise OllamaInvalidResponse
+    except requests.RequestException as error:
+        _raise_ollama_request_error(error)
+    finally:
+        response.close()
+
+
+def stream_cascaded_response(
+    query: str, started: float
+) -> Iterator[dict[str, object]]:
+    generation_metrics: list[dict[str, float | None]] = []
+    small_response_parts = []
+    preflight_stream = stream_response(SMALL_MODEL, query)
+    try:
+        for part in preflight_stream:
+            if "token" in part:
+                small_response_parts.append(part["token"])
+                yield {"phase": "routing"}
+            elif "metrics" in part:
+                generation_metrics.append(part["metrics"])
+    finally:
+        close_stream = getattr(preflight_stream, "close", None)
+        if callable(close_stream):
+            close_stream()
+
+    confidence = evaluate_confidence(query, "".join(small_response_parts))
+    escalated = confidence < CONFIDENCE_THRESHOLD
+    model = LARGE_MODEL if escalated else SMALL_MODEL
+    yield {
+        "routing": {
+            "model": model,
+            "confidence": confidence,
+            "escalated": escalated,
+        }
+    }
+
+    answer_stream = stream_response(model, query)
+    try:
+        for part in answer_stream:
+            if "token" in part:
+                yield part
+            elif "metrics" in part:
+                generation_metrics.append(part["metrics"])
+    finally:
+        close_stream = getattr(answer_stream, "close", None)
+        if callable(close_stream):
+            close_stream()
+
+    yield {"complete": {"timing": build_timing(started, generation_metrics)}}
+
+
 def _sum_metric(
     metrics: list[dict[str, float | None]], name: str
 ) -> float | None:
@@ -137,6 +283,28 @@ def _sum_metric(
     if any(value is None for value in values):
         return None
     return round(sum(value for value in values if value is not None), 2)
+
+
+def build_timing(
+    started: float, generation_metrics: list[dict[str, float | None]]
+) -> dict[str, float | None]:
+    ollama_total_ms = _sum_metric(generation_metrics, "ollama_total_ms")
+    timing: dict[str, float | None] = {
+        "total_ms": round((time.perf_counter() - started) * 1000, 2),
+        "ollama_total_ms": ollama_total_ms,
+        "model_loading_ms": _sum_metric(generation_metrics, "model_loading_ms"),
+        "prompt_processing_ms": _sum_metric(
+            generation_metrics, "prompt_processing_ms"
+        ),
+        "token_generation_ms": _sum_metric(
+            generation_metrics, "token_generation_ms"
+        ),
+    }
+    if ollama_total_ms is not None:
+        timing["other_ms"] = round(
+            max(0, timing["total_ms"] - ollama_total_ms), 2
+        )
+    return timing
 
 
 def route_query(query: str) -> dict[str, object]:
@@ -166,21 +334,5 @@ def route_query(query: str) -> dict[str, object]:
             "escalated": False,
         }
 
-    ollama_total_ms = _sum_metric(generation_metrics, "ollama_total_ms")
-    timing: dict[str, float | None] = {
-        "total_ms": round((time.perf_counter() - started) * 1000, 2),
-        "ollama_total_ms": ollama_total_ms,
-        "model_loading_ms": _sum_metric(generation_metrics, "model_loading_ms"),
-        "prompt_processing_ms": _sum_metric(
-            generation_metrics, "prompt_processing_ms"
-        ),
-        "token_generation_ms": _sum_metric(
-            generation_metrics, "token_generation_ms"
-        ),
-    }
-    if ollama_total_ms is not None:
-        timing["other_ms"] = round(
-            max(0, timing["total_ms"] - ollama_total_ms), 2
-        )
-    result["timing"] = timing
+    result["timing"] = build_timing(started, generation_metrics)
     return result

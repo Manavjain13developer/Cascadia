@@ -29,8 +29,50 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import "./App.css";
+
+async function* readServerSentEvents(stream) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const parseFrame = (frame) => {
+    let event = "message";
+    const data = [];
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith("event:")) {
+        event = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        data.push(line.slice(5).trimStart());
+      }
+    }
+    return data.length ? { event, data: JSON.parse(data.join("\n")) } : null;
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      let separator;
+      while ((separator = /\r?\n\r?\n/.exec(buffer))) {
+        const frame = buffer.slice(0, separator.index);
+        buffer = buffer.slice(separator.index + separator[0].length);
+        const parsed = parseFrame(frame);
+        if (parsed) yield parsed;
+      }
+      if (done) {
+        if (buffer.trim()) {
+          const parsed = parseFrame(buffer);
+          if (parsed) yield parsed;
+        }
+        break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 const navigation = [
   { label: "Playground", path: "/playground", icon: Sparkles },
@@ -309,6 +351,7 @@ function Playground() {
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [status, setStatus] = useState("idle");
+  const activeRequest = useRef(null);
 
   const submitQuery = async (event) => {
     event.preventDefault();
@@ -323,29 +366,83 @@ function Playground() {
     setResult(null);
     setErrorMessage("");
     setStatus("loading");
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    let responseText = "";
+    let completed = false;
     try {
-      const response = await fetch("/api/query", {
+      const response = await fetch("/api/query/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: trimmedQuery }),
+        signal: controller.signal,
       });
-      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         throw new Error(
           data.error ||
             "Could not reach Flask. Make sure the local backend is running.",
         );
       }
-      setResult(data);
-      setStatus("success");
+      if (!response.body) {
+        throw new Error("The browser could not open the response stream.");
+      }
+
+      for await (const eventData of readServerSentEvents(response.body)) {
+        if (controller.signal.aborted) {
+          break;
+        }
+        if (eventData.event === "routing") {
+          setResult({
+            response: responseText,
+            ...eventData.data,
+            timing: null,
+          });
+          setStatus("streaming");
+        } else if (eventData.event === "token") {
+          if (typeof eventData.data.token !== "string") {
+            throw new Error("The response stream contained an invalid token.");
+          }
+          responseText += eventData.data.token;
+          setResult((current) =>
+            current ? { ...current, response: responseText } : current,
+          );
+        } else if (eventData.event === "complete") {
+          setResult((current) =>
+            current ? { ...current, timing: eventData.data.timing } : current,
+          );
+          completed = true;
+          setStatus("success");
+        } else if (eventData.event === "error") {
+          throw new Error(
+            eventData.data.error || "The response stream was interrupted.",
+          );
+        }
+      }
+      if (!completed && !controller.signal.aborted) {
+        throw new Error("The response stream ended before generation completed.");
+      }
     } catch (error) {
-      setErrorMessage(
-        error instanceof TypeError
-          ? "Could not reach Flask. Make sure the local backend is running."
-          : error.message,
-      );
-      setStatus("error");
+      if (controller.signal.aborted) {
+        setStatus("stopped");
+      } else {
+        setErrorMessage(
+          error instanceof TypeError
+            ? "The connection to Cascadia was lost. Check that the local backend is running."
+            : error.message,
+        );
+        setStatus("error");
+      }
+    } finally {
+      if (activeRequest.current === controller) {
+        activeRequest.current = null;
+      }
     }
+  };
+
+  const stopGeneration = () => {
+    activeRequest.current?.abort();
+    setStatus("stopped");
   };
 
   const selectExample = (example) => {
@@ -401,18 +498,24 @@ function Playground() {
                 <span className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
                   Small model: qwen2.5:3b
                 </span>
-                <button
-                  type="submit"
-                  disabled={status === "loading"}
-                  className="inline-flex items-center gap-2 rounded-lg border border-sky-300/35 bg-sky-300/[.1] px-4 py-2.5 text-xs font-medium text-sky-100 transition hover:border-sky-200/70 hover:bg-sky-300/[.16]"
-                >
-                  {status === "loading" ? (
-                    <LoaderCircle size={14} className="animate-spin" />
-                  ) : (
+                {status === "loading" || status === "streaming" ? (
+                  <button
+                    type="button"
+                    onClick={stopGeneration}
+                    className="inline-flex items-center gap-2 rounded-lg border border-rose-300/30 bg-rose-300/[.08] px-4 py-2.5 text-xs font-medium text-rose-200 transition hover:border-rose-200/70 hover:bg-rose-300/[.14]"
+                  >
+                    <X size={14} />
+                    Stop generation
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-2 rounded-lg border border-sky-300/35 bg-sky-300/[.1] px-4 py-2.5 text-xs font-medium text-sky-100 transition hover:border-sky-200/70 hover:bg-sky-300/[.16]"
+                  >
                     <Send size={14} />
-                  )}
-                  {status === "loading" ? "Thinking" : "Send"}
-                </button>
+                    Send
+                  </button>
+                )}
               </div>
             </form>
 
@@ -422,6 +525,7 @@ function Playground() {
                   key={example}
                   type="button"
                   onClick={() => selectExample(example)}
+                  disabled={status === "loading" || status === "streaming"}
                   className="rounded-full border border-white/[.1] bg-white/[.025] px-3 py-2 text-left text-[11px] text-slate-400 transition hover:border-sky-300/30 hover:text-slate-200"
                 >
                   {example}
@@ -466,7 +570,21 @@ function Playground() {
                 </p>
               </div>
             )}
-            {status === "success" && (
+            {status === "stopped" && !result && (
+              <div className="mt-16 text-center sm:mt-20">
+                <p className="font-display text-lg text-slate-300">
+                  Generation stopped.
+                </p>
+                <p className="mt-2 text-xs text-slate-600">
+                  The local model request was cancelled.
+                </p>
+              </div>
+            )}
+            {(status === "streaming" ||
+              status === "success" ||
+              status === "stopped" ||
+              (status === "error" && result?.response)) &&
+              result && (
               <div className="mt-10 space-y-5 animate-rise">
                 <div className="flex items-center justify-between">
                   <div>
@@ -474,11 +592,29 @@ function Playground() {
                       Inference details
                     </p>
                     <h2 className="mt-2 font-display text-xl text-slate-100">
-                      Response ready
+                      {status === "streaming"
+                        ? "Generating response..."
+                        : status === "stopped"
+                          ? "Generation stopped"
+                          : status === "error"
+                            ? "Response interrupted"
+                            : "Response ready"}
                     </h2>
                   </div>
-                  <span className="rounded-full border border-emerald-300/20 bg-emerald-300/[.06] px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider text-emerald-300">
-                    Complete
+                  <span
+                    className={`rounded-full border px-2.5 py-1 font-mono text-[9px] uppercase tracking-wider ${
+                      status === "success"
+                        ? "border-emerald-300/20 bg-emerald-300/[.06] text-emerald-300"
+                        : "border-sky-300/20 bg-sky-300/[.06] text-sky-200"
+                    }`}
+                  >
+                    {status === "streaming"
+                      ? "Generating"
+                      : status === "stopped"
+                        ? "Stopped"
+                        : status === "error"
+                          ? "Interrupted"
+                          : "Complete"}
                   </span>
                 </div>
                 <div className="glass rounded-2xl p-5 sm:p-6">
@@ -504,15 +640,19 @@ function Playground() {
                         Response time
                       </p>
                       <p className="mt-2 text-sm text-slate-100">
-                        {result.timing.total_ms >= 1000
+                        {!result.timing
+                          ? "—"
+                          : result.timing.total_ms >= 1000
                           ? `${(result.timing.total_ms / 1000).toFixed(2)} s`
                           : `${result.timing.total_ms.toFixed(0)} ms`}
                       </p>
                       <p className="mt-1 text-[10px] leading-5 text-slate-500">
-                        {result.timing.model_loading_ms === null ||
+                        {!result.timing
+                          ? "Measured through generation completion"
+                          : result.timing.model_loading_ms === null ||
                         result.timing.prompt_processing_ms === null ||
                         result.timing.token_generation_ms === null
-                          ? "Stage timings unavailable"
+                            ? "Stage timings unavailable"
                           : `Load ${(result.timing.model_loading_ms / 1000).toFixed(2)}s · Prompt ${(result.timing.prompt_processing_ms / 1000).toFixed(2)}s · Generate ${(result.timing.token_generation_ms / 1000).toFixed(2)}s`}
                       </p>
                     </div>
@@ -537,9 +677,32 @@ function Playground() {
                     </span>
                   </div>
                   <div className="markdown-content text-sm leading-7 text-slate-300">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {result.response}
-                    </ReactMarkdown>
+                    {result.response ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {result.response}
+                      </ReactMarkdown>
+                    ) : status === "streaming" ? (
+                      <p className="text-slate-500">
+                        Generating the first tokens
+                        <span className="ml-1 inline-flex gap-1 align-middle">
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-sky-300 [animation-delay:-.3s]" />
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-blue-300 [animation-delay:-.15s]" />
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-violet-300" />
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-slate-500">
+                        {status === "stopped"
+                          ? "Generation stopped before a response arrived."
+                          : "No response text was received."}
+                      </p>
+                    )}
+                    {result.response && status === "streaming" && (
+                      <span
+                        aria-label="Generating"
+                        className="ml-1 inline-block h-3 w-1 animate-pulse rounded-full bg-sky-300 align-middle"
+                      />
+                    )}
                   </div>
                 </div>
               </div>
