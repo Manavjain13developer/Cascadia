@@ -236,6 +236,7 @@ def stream_cascaded_response(
 ) -> Iterator[dict[str, object]]:
     generation_metrics: list[dict[str, int | float | None]] = []
     small_response_parts = []
+    preflight_metrics = None
     preflight_stream = stream_response(SMALL_MODEL, query)
     try:
         for part in preflight_stream:
@@ -243,7 +244,8 @@ def stream_cascaded_response(
                 small_response_parts.append(part["token"])
                 yield {"phase": "routing"}
             elif "metrics" in part:
-                generation_metrics.append(part["metrics"])
+                preflight_metrics = part["metrics"]
+                generation_metrics.append(preflight_metrics)
     finally:
         close_stream = getattr(preflight_stream, "close", None)
         if callable(close_stream):
@@ -257,27 +259,37 @@ def stream_cascaded_response(
             "model": model,
             "confidence": confidence,
             "escalated": escalated,
+            "response_mode": "live" if escalated else "buffered",
         }
     }
 
-    answer_stream = stream_response(model, query)
-    answer_metrics = None
     time_to_first_token_ms = None
-    try:
-        for part in answer_stream:
-            if "token" in part:
-                if time_to_first_token_ms is None:
-                    time_to_first_token_ms = round(
-                        (time.perf_counter() - started) * 1000, 2
-                    )
-                yield part
-            elif "metrics" in part:
-                answer_metrics = part["metrics"]
-                generation_metrics.append(answer_metrics)
-    finally:
-        close_stream = getattr(answer_stream, "close", None)
-        if callable(close_stream):
-            close_stream()
+    if escalated:
+        answer_metrics = None
+        answer_stream = stream_response(model, query)
+        try:
+            for part in answer_stream:
+                if "token" in part:
+                    if time_to_first_token_ms is None:
+                        time_to_first_token_ms = round(
+                            (time.perf_counter() - started) * 1000, 2
+                        )
+                    yield part
+                elif "metrics" in part:
+                    answer_metrics = part["metrics"]
+                    generation_metrics.append(answer_metrics)
+        finally:
+            close_stream = getattr(answer_stream, "close", None)
+            if callable(close_stream):
+                close_stream()
+    else:
+        answer_metrics = preflight_metrics
+        for token in small_response_parts:
+            if time_to_first_token_ms is None:
+                time_to_first_token_ms = round(
+                    (time.perf_counter() - started) * 1000, 2
+                )
+            yield {"buffered": token}
 
     yield {
         "complete": {

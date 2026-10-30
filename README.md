@@ -31,9 +31,11 @@ npm run dev
 Open the local URL printed by Vite. Requests to `/api/query` are proxied to
 Flask on `http://localhost:5000`; the Playground uses `/api/query/stream` for
 Server-Sent Events. Confidence routing still needs the complete 3B candidate
-before selecting the final model, so that preflight is buffered and only the
-selected answer is streamed. Direct 3B requests therefore generate twice.
-Stopping a request closes the active Ollama stream.
+before selecting the final model. If 3B is selected, Cascadia progressively
+replays that buffered candidate instead of generating it again; if confidence
+is below the threshold, the selected 7B answer is streamed live. Time to first
+displayed text includes the complete 3B preflight. Stopping a request closes the
+active Ollama stream.
 
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 

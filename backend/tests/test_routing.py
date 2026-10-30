@@ -268,6 +268,7 @@ class RoutingApiTests(unittest.TestCase):
                 "model": LARGE_MODEL,
                 "confidence": 0.48,
                 "escalated": True,
+                "response_mode": "live",
             }},
             {"token": "Escalated answer."},
             {"complete": {"timing": {
@@ -288,6 +289,30 @@ class RoutingApiTests(unittest.TestCase):
 
         self.assertIn('"model":"qwen2.5:7b","confidence":0.48,"escalated":true', body)
         self.assertIn('"token":"Escalated answer."', body)
+        cascade.assert_called_once()
+
+    @patch("backend.app.stream_cascaded_response")
+    def test_stream_endpoint_labels_buffered_response_replay(self, cascade):
+        cascade.return_value = iter([
+            {"routing": {
+                "model": SMALL_MODEL,
+                "confidence": 0.92,
+                "escalated": False,
+                "response_mode": "buffered",
+            }},
+            {"buffered": "Buffered answer."},
+            {"complete": {"timing": {"total_ms": 10.0}}},
+        ])
+
+        response = self.client.post(
+            "/api/query/stream",
+            json={"query": "What is 2 + 2?"},
+        )
+        body = response.get_data(as_text=True)
+
+        self.assertIn("event: buffered", body)
+        self.assertIn('"text":"Buffered answer."', body)
+        self.assertNotIn("event: token", body)
         cascade.assert_called_once()
 
     @patch("backend.app.stream_cascaded_response", side_effect=OllamaModelNotFound)
@@ -348,8 +373,11 @@ class RoutingApiTests(unittest.TestCase):
             "generated_tokens": 21,
         }
         stream.side_effect = [
-            iter([{"token": "A concise answer."}, {"metrics": metrics}]),
-            iter([{"token": "Streamed answer."}, {"metrics": metrics}]),
+            iter([
+                {"token": "A concise "},
+                {"token": "answer."},
+                {"metrics": metrics},
+            ]),
         ]
 
         events = list(stream_cascaded_response("What is 2 + 2?", time.perf_counter()))
@@ -359,23 +387,23 @@ class RoutingApiTests(unittest.TestCase):
                 "model": SMALL_MODEL,
                 "confidence": 0.92,
                 "escalated": False,
+                "response_mode": "buffered",
             }},
             events,
         )
         self.assertEqual(
-            [event["token"] for event in events if "token" in event],
-            ["Streamed answer."],
+            [event["buffered"] for event in events if "buffered" in event],
+            ["A concise ", "answer."],
         )
-        self.assertEqual(
-            [call.args[0] for call in stream.call_args_list],
-            [SMALL_MODEL, SMALL_MODEL],
-        )
+        stream.assert_called_once_with(SMALL_MODEL, "What is 2 + 2?")
         timing = next(
             event["complete"]["timing"] for event in events if "complete" in event
         )
+        self.assertEqual(timing["ollama_total_ms"], 10.0)
         self.assertEqual(timing["generated_tokens"], 21)
         self.assertEqual(timing["tokens_per_second"], 3000.0)
         self.assertIsInstance(timing["time_to_first_token_ms"], float)
+        self.assertEqual(len([event for event in events if "buffered" in event]), 2)
 
     @patch("backend.core.router.stream_response")
     def test_cascade_stream_escalates_to_large_model(self, stream):
@@ -400,6 +428,7 @@ class RoutingApiTests(unittest.TestCase):
                 "model": LARGE_MODEL,
                 "confidence": 0.48,
                 "escalated": True,
+                "response_mode": "live",
             }},
             events,
         )
@@ -411,6 +440,10 @@ class RoutingApiTests(unittest.TestCase):
             [call.args[0] for call in stream.call_args_list],
             [SMALL_MODEL, LARGE_MODEL],
         )
+        timing = next(
+            event["complete"]["timing"] for event in events if "complete" in event
+        )
+        self.assertEqual(timing["ollama_total_ms"], 20.0)
 
     @patch("backend.core.router.requests.post")
     def test_closing_stream_closes_ollama_generation(self, post):

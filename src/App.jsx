@@ -396,9 +396,18 @@ function Playground() {
           setResult({
             response: responseText,
             ...eventData.data,
+            responseMode: eventData.data.response_mode,
             timing: null,
           });
           setStatus("streaming");
+        } else if (eventData.event === "buffered") {
+          if (typeof eventData.data.text !== "string") {
+            throw new Error("The response stream contained invalid buffered text.");
+          }
+          responseText += eventData.data.text;
+          setResult((current) =>
+            current ? { ...current, response: responseText } : current,
+          );
         } else if (eventData.event === "token") {
           if (typeof eventData.data.token !== "string") {
             throw new Error("The response stream contained an invalid token.");
@@ -593,7 +602,9 @@ function Playground() {
                     </p>
                     <h2 className="mt-2 font-display text-xl text-slate-100">
                       {status === "streaming"
-                        ? "Generating response..."
+                        ? result.responseMode === "buffered"
+                          ? "Displaying buffered response..."
+                          : "Generating response..."
                         : status === "stopped"
                           ? "Generation stopped"
                           : status === "error"
@@ -609,7 +620,9 @@ function Playground() {
                     }`}
                   >
                     {status === "streaming"
-                      ? "Generating"
+                      ? result.responseMode === "buffered"
+                        ? "Buffered replay"
+                        : "Generating"
                       : status === "stopped"
                         ? "Stopped"
                         : status === "error"
@@ -715,7 +728,9 @@ function Playground() {
                       </ReactMarkdown>
                     ) : status === "streaming" ? (
                       <p className="text-slate-500">
-                        Generating the first tokens
+                        {result.responseMode === "buffered"
+                          ? "Displaying the buffered response"
+                          : "Generating the first tokens"}
                         <span className="ml-1 inline-flex gap-1 align-middle">
                           <span className="h-1 w-1 animate-bounce rounded-full bg-sky-300 [animation-delay:-.3s]" />
                           <span className="h-1 w-1 animate-bounce rounded-full bg-blue-300 [animation-delay:-.15s]" />
@@ -731,7 +746,11 @@ function Playground() {
                     )}
                     {result.response && status === "streaming" && (
                       <span
-                        aria-label="Generating"
+                        aria-label={
+                          result.responseMode === "buffered"
+                            ? "Displaying buffered response"
+                            : "Generating"
+                        }
                         className="ml-1 inline-block h-3 w-1 animate-pulse rounded-full bg-sky-300 align-middle"
                       />
                     )}

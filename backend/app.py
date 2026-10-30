@@ -84,6 +84,8 @@ def stream_query_model():
             for part in cascade_stream:
                 if "token" in part:
                     yield _sse_event("token", {"token": part["token"]})
+                elif "buffered" in part:
+                    yield _sse_event("buffered", {"text": part["buffered"]})
                 elif "routing" in part:
                     yield _sse_event("routing", part["routing"])
                 elif "phase" in part:
