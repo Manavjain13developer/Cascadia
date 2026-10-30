@@ -52,7 +52,13 @@ def run_query(client, item: dict[str, Any]) -> dict[str, Any]:
                 "response_time_seconds": elapsed,
             }
 
-        required_fields = ("response", "model", "confidence", "escalated")
+        required_fields = (
+            "response",
+            "model",
+            "confidence",
+            "escalated",
+            "timing",
+        )
         missing_fields = [field for field in required_fields if field not in payload]
         if missing_fields:
             raise ValueError(f"API response is missing fields: {', '.join(missing_fields)}")
@@ -63,6 +69,7 @@ def run_query(client, item: dict[str, Any]) -> dict[str, Any]:
             "model": payload["model"],
             "confidence": payload["confidence"],
             "escalated": payload["escalated"],
+            "timing": payload.get("timing"),
             "response_time_seconds": elapsed,
         }
     except Exception as error:
@@ -86,6 +93,13 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     successful_times = [result["response_time_seconds"] for result in successful]
     escalated_count = sum(bool(result["escalated"]) for result in successful)
     success_count = len(successful)
+    timing_metrics = (
+        "ollama_total_ms",
+        "model_loading_ms",
+        "prompt_processing_ms",
+        "token_generation_ms",
+        "other_ms",
+    )
 
     return {
         "successful_queries": success_count,
@@ -104,6 +118,17 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         if success_count
         else 0.0,
         "average_response_time": _average(successful_times),
+        "average_timing_seconds": {
+            metric: _average(
+                [
+                    result["timing"][metric] / 1000
+                    for result in successful
+                    if isinstance(result.get("timing"), dict)
+                    and isinstance(result["timing"].get(metric), (int, float))
+                ]
+            )
+            for metric in timing_metrics
+        },
         "category_average_response_time": {
             category: _average(
                 [
@@ -159,6 +184,9 @@ def print_summary(results: list[dict[str, Any]], summary: dict[str, Any]) -> Non
     print("RESPONSE TIME")
     print("----------------------------------------")
     print(f"Average Response Time: {summary['average_response_time']:.3f} sec")
+    print("\nAverage timing breakdown:")
+    for metric, average in summary["average_timing_seconds"].items():
+        print(f"  {metric.replace('_', ' ').title()}: {average:.3f} sec")
     for category in ("simple", "medium", "complex"):
         print(f"{category.title()} Average: {category_averages[category]:.3f} sec")
     print("\nMODEL USAGE BY CATEGORY")

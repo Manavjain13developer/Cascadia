@@ -2,8 +2,13 @@
 
 ## Run Cascadia locally
 
-Start Ollama with the `qwen2.5:3b` model available, then run the backend and
-frontend in separate terminals.
+Make sure Ollama has both `qwen2.5:3b` and `qwen2.5:7b` available. Cascadia
+starts each query on the 3B model, escalating to 7B only when confidence is
+below the configured threshold. Models are kept loaded for 10 minutes after
+use, and the response details show total time plus Ollama's load, prompt, and
+generation timings. Generation limits scale with query complexity (256, 768,
+or 1,536 tokens), context grows only when needed, and Ollama's model-default
+temperature is retained.
 
 Backend:
 

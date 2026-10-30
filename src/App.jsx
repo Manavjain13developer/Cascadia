@@ -503,7 +503,18 @@ function Playground() {
                       <p className="font-mono text-[9px] uppercase tracking-wider text-slate-600">
                         Response time
                       </p>
-                      <p className="mt-2 text-sm text-slate-100">—</p>
+                      <p className="mt-2 text-sm text-slate-100">
+                        {result.timing.total_ms >= 1000
+                          ? `${(result.timing.total_ms / 1000).toFixed(2)} s`
+                          : `${result.timing.total_ms.toFixed(0)} ms`}
+                      </p>
+                      <p className="mt-1 text-[10px] leading-5 text-slate-500">
+                        {result.timing.model_loading_ms === null ||
+                        result.timing.prompt_processing_ms === null ||
+                        result.timing.token_generation_ms === null
+                          ? "Stage timings unavailable"
+                          : `Load ${(result.timing.model_loading_ms / 1000).toFixed(2)}s · Prompt ${(result.timing.prompt_processing_ms / 1000).toFixed(2)}s · Generate ${(result.timing.token_generation_ms / 1000).toFixed(2)}s`}
+                      </p>
                     </div>
                   </div>
                   <div className="mt-6 border-t border-white/[.08] pt-4">
