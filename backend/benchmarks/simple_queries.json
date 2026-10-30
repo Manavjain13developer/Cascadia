@@ -1,0 +1,17 @@
+[
+  {"id": 1, "query": "Convert 5 kilometers to meters."},
+  {"id": 2, "query": "What is a Java variable?"},
+  {"id": 3, "query": "What is the capital of France?"},
+  {"id": 4, "query": "Explain what an array is."},
+  {"id": 5, "query": "What does HTML stand for?"},
+  {"id": 6, "query": "What is 12 multiplied by 8?"},
+  {"id": 7, "query": "How do I create a list in Python?"},
+  {"id": 8, "query": "At what temperature does water boil in Celsius?"},
+  {"id": 9, "query": "How many days are in a week?"},
+  {"id": 10, "query": "Give me a synonym for rapid."},
+  {"id": 11, "query": "What does CSS stand for?"},
+  {"id": 12, "query": "Which planet is largest in our solar system?"},
+  {"id": 13, "query": "Convert 100 centimeters to meters."},
+  {"id": 14, "query": "What are the two Boolean values in Java?"},
+  {"id": 15, "query": "What does a CPU do?"}
+]

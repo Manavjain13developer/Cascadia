@@ -1,0 +1,17 @@
+[
+  {"id": 1, "query": "Explain how a hash map stores key-value pairs and handles collisions."},
+  {"id": 2, "query": "Write a SQL query that returns each customer's total order value and includes only customers whose total exceeds 500."},
+  {"id": 3, "query": "Describe the loop condition and termination case needed for binary search on a sorted array."},
+  {"id": 4, "query": "How can Python find duplicate values in a list efficiently, and what extra memory does the approach use?"},
+  {"id": 5, "query": "Solve 3x + 7 = 31 and show the main steps."},
+  {"id": 6, "query": "Explain when an HTTP PUT request is idempotent and how that differs from a typical POST request."},
+  {"id": 7, "query": "Write a SQL query that returns all employees tied for the highest salary in each department."},
+  {"id": 8, "query": "What is the time complexity of two nested loops over the same n-element list, and why?"},
+  {"id": 9, "query": "Explain the purpose of database normalization and give a brief example of separating repeated customer data from orders."},
+  {"id": 10, "query": "In JavaScript, how should async and await be combined with try/catch to handle a rejected promise?"},
+  {"id": 11, "query": "Convert 68 degrees Fahrenheit to Celsius and show the formula."},
+  {"id": 12, "query": "Compare a stack and a queue, including one suitable use case for each."},
+  {"id": 13, "query": "Why can removing items from a Java ArrayList inside an enhanced for loop cause ConcurrentModificationException, and what is a safe alternative?"},
+  {"id": 14, "query": "How does a database index speed up reads, and what is one cost it adds to writes?"},
+  {"id": 15, "query": "Describe how exponential backoff can reduce repeated failures when a client retries a request."}
+]

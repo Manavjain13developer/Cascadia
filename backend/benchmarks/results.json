@@ -1,0 +1,491 @@
+{
+  "timestamp": "2026-09-25T20:51:05.665222+00:00",
+  "total_queries": 45,
+  "summary": {
+    "successful_queries": 45,
+    "failed_queries": 0,
+    "category_counts": {
+      "simple": 15,
+      "medium": 15,
+      "complex": 15
+    },
+    "3b_count": 41,
+    "7b_count": 4,
+    "3b_percentage": 91.11,
+    "7b_percentage": 8.89,
+    "escalated_queries": 4,
+    "escalation_rate": 8.89,
+    "average_response_time": 51.967,
+    "category_average_response_time": {
+      "simple": 11.256,
+      "medium": 33.089,
+      "complex": 111.556
+    },
+    "model_usage_by_category": {
+      "simple": {
+        "3b": 15,
+        "7b": 0
+      },
+      "medium": {
+        "3b": 15,
+        "7b": 0
+      },
+      "complex": {
+        "3b": 11,
+        "7b": 4
+      }
+    }
+  },
+  "results": [
+    {
+      "id": 1,
+      "query": "Convert 5 kilometers to meters.",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 11.031
+    },
+    {
+      "id": 1,
+      "query": "Explain how a hash map stores key-value pairs and handles collisions.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 61.906
+    },
+    {
+      "id": 1,
+      "query": "Design a thread-safe in-memory cache with LRU eviction and per-entry expiration. Explain the data structures, synchronization strategy, and how you would prevent expired entries from accumulating.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 103.801
+    },
+    {
+      "id": 2,
+      "query": "What is a Java variable?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 31.543
+    },
+    {
+      "id": 3,
+      "query": "What is the capital of France?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 2.703
+    },
+    {
+      "id": 4,
+      "query": "Explain what an array is.",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 24.979
+    },
+    {
+      "id": 5,
+      "query": "What does HTML stand for?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 2.842
+    },
+    {
+      "id": 6,
+      "query": "What is 12 multiplied by 8?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 3.0
+    },
+    {
+      "id": 7,
+      "query": "How do I create a list in Python?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 33.565
+    },
+    {
+      "id": 8,
+      "query": "At what temperature does water boil in Celsius?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 11.824
+    },
+    {
+      "id": 9,
+      "query": "How many days are in a week?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 2.946
+    },
+    {
+      "id": 10,
+      "query": "Give me a synonym for rapid.",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 2.823
+    },
+    {
+      "id": 11,
+      "query": "What does CSS stand for?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 2.822
+    },
+    {
+      "id": 12,
+      "query": "Which planet is largest in our solar system?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 3.005
+    },
+    {
+      "id": 13,
+      "query": "Convert 100 centimeters to meters.",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 3.192
+    },
+    {
+      "id": 14,
+      "query": "What are the two Boolean values in Java?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 6.626
+    },
+    {
+      "id": 15,
+      "query": "What does a CPU do?",
+      "category": "simple",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 25.932
+    },
+    {
+      "id": 2,
+      "query": "Write a SQL query that returns each customer's total order value and includes only customers whose total exceeds 500.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 23.083
+    },
+    {
+      "id": 3,
+      "query": "Describe the loop condition and termination case needed for binary search on a sorted array.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 32.451
+    },
+    {
+      "id": 4,
+      "query": "How can Python find duplicate values in a list efficiently, and what extra memory does the approach use?",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 48.416
+    },
+    {
+      "id": 5,
+      "query": "Solve 3x + 7 = 31 and show the main steps.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 17.209
+    },
+    {
+      "id": 6,
+      "query": "Explain when an HTTP PUT request is idempotent and how that differs from a typical POST request.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 35.341
+    },
+    {
+      "id": 7,
+      "query": "Write a SQL query that returns all employees tied for the highest salary in each department.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 18.679
+    },
+    {
+      "id": 8,
+      "query": "What is the time complexity of two nested loops over the same n-element list, and why?",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 14.861
+    },
+    {
+      "id": 9,
+      "query": "Explain the purpose of database normalization and give a brief example of separating repeated customer data from orders.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 39.058
+    },
+    {
+      "id": 10,
+      "query": "In JavaScript, how should async and await be combined with try/catch to handle a rejected promise?",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 37.458
+    },
+    {
+      "id": 11,
+      "query": "Convert 68 degrees Fahrenheit to Celsius and show the formula.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 11.41
+    },
+    {
+      "id": 12,
+      "query": "Compare a stack and a queue, including one suitable use case for each.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.7,
+      "escalated": false,
+      "response_time_seconds": 40.387
+    },
+    {
+      "id": 13,
+      "query": "Why can removing items from a Java ArrayList inside an enhanced for loop cause ConcurrentModificationException, and what is a safe alternative?",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 62.814
+    },
+    {
+      "id": 14,
+      "query": "How does a database index speed up reads, and what is one cost it adds to writes?",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 20.661
+    },
+    {
+      "id": 15,
+      "query": "Describe how exponential backoff can reduce repeated failures when a client retries a request.",
+      "category": "medium",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 32.607
+    },
+    {
+      "id": 2,
+      "query": "Design an algorithm that reads an unbounded stream of integers and reports the median after every insertion. Explain its invariants, complexity, and behavior with duplicate values.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 55.472
+    },
+    {
+      "id": 3,
+      "query": "Design a URL-shortening service for high read volume. Cover identifier generation, storage schema, redirect caching, collision handling, abuse controls, and how you would scale reads across regions.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 73.338
+    },
+    {
+      "id": 4,
+      "query": "Propose a multi-tenant database architecture for a SaaS product with strict tenant isolation and uneven tenant sizes. Compare shared-schema and separate-database approaches, including migrations, noisy-neighbor risks, and recovery.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:7b",
+      "confidence": 0.48,
+      "escalated": true,
+      "response_time_seconds": 221.86
+    },
+    {
+      "id": 5,
+      "query": "A Java service shows rising memory use and periodic pauses after a deployment. Describe a systematic debugging plan using heap, garbage-collection, and allocation evidence, and explain how you would distinguish a leak from increased legitimate workload.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.8,
+      "escalated": false,
+      "response_time_seconds": 68.257
+    },
+    {
+      "id": 6,
+      "query": "Given jobs with release times, durations, and deadlines on two machines, formulate a scheduling strategy that minimizes late jobs. Explain the assumptions, trade-offs, and how you would validate the result for realistic workloads.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.7,
+      "escalated": false,
+      "response_time_seconds": 58.161
+    },
+    {
+      "id": 7,
+      "query": "A PostgreSQL query became slow as a table grew from one million to two hundred million rows. Explain how you would analyze its plan, choose indexes, account for selectivity and write overhead, and validate an optimization safely.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:7b",
+      "confidence": 0.36,
+      "escalated": true,
+      "response_time_seconds": 204.862
+    },
+    {
+      "id": 8,
+      "query": "Compare event-driven messaging with periodic polling for a service that processes financial updates. Analyze latency, duplicate delivery, ordering, backpressure, operational complexity, and recovery after an outage.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.7,
+      "escalated": false,
+      "response_time_seconds": 71.099
+    },
+    {
+      "id": 9,
+      "query": "Design an idempotency mechanism for a payment API when clients may retry after timeouts and requests can be processed concurrently. Explain key scope, persistence, transaction boundaries, expiration, and failure cases.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 104.307
+    },
+    {
+      "id": 10,
+      "query": "Design a distributed rate limiter for an API deployed in multiple regions. Compare token bucket and sliding-window approaches, address clock and network failures, and explain the consistency-versus-availability trade-off.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:7b",
+      "confidence": 0.48,
+      "escalated": true,
+      "response_time_seconds": 233.678
+    },
+    {
+      "id": 11,
+      "query": "A distributed application must support reads during a network partition while preventing conflicting updates to inventory. Explain the consistency choices, conflict handling, and user-visible consequences, including what guarantees cannot all be maintained.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:7b",
+      "confidence": 0.57,
+      "escalated": true,
+      "response_time_seconds": 213.793
+    },
+    {
+      "id": 12,
+      "query": "Plan a zero-downtime migration from a single database table to a new normalized schema while old and new application versions run concurrently. Include backfill, dual writes, verification, rollback, and final cutover.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 71.476
+    },
+    {
+      "id": 13,
+      "query": "Two services intermittently deadlock while updating accounts and ledger entries. Explain how to use traces and database evidence to find the lock cycle, then propose transaction ordering and retry changes without weakening correctness.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 62.913
+    },
+    {
+      "id": 14,
+      "query": "Design compaction for an LSM-tree storage engine under mixed reads, writes, and deletes. Explain how level sizing, tombstones, write amplification, read amplification, and available disk space affect the strategy.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.92,
+      "escalated": false,
+      "response_time_seconds": 72.342
+    },
+    {
+      "id": 15,
+      "query": "Design cache invalidation for product data changed by several services and read from multiple regions. Compare event-based invalidation, versioned keys, and short TTLs, and explain how to handle lost events and stale reads.",
+      "category": "complex",
+      "status": "success",
+      "model": "qwen2.5:3b",
+      "confidence": 0.7,
+      "escalated": false,
+      "response_time_seconds": 57.983
+    }
+  ]
+}
